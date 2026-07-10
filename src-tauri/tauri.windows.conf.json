@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": [
+      "binaries/sing-box",
+      "binaries/amneziawg",
+      "binaries/awg-shim"
+    ],
+    "resources": {
+      "binaries/wintun.dll": "",
+      "binaries/geoip-ru.srs": ""
+    }
+  }
+}

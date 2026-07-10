@@ -1,0 +1,114 @@
+name: Build installers
+
+# Собирает инсталлеры UniGate под Windows и macOS.
+# - workflow_dispatch — ручной запуск (артефакты качаются со страницы run).
+# - push тега v* — то же самое + отдельным джобом публикует GitHub Release
+#   со всеми инсталлерами (после того как ОБЕ сборки успешно завершились).
+#
+# Сетевые бинарники (sing-box, geoip-ru, wintun, amneziawg) в git не хранятся
+# (см. .gitignore) — их тянут scripts/fetch-singbox.{ps1,sh} перед сборкой.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            fetch: pwsh scripts/fetch-singbox.ps1
+          - os: macos-latest # macos-latest = Apple Silicon (arm64)
+            label: macos-arm64
+            fetch: bash scripts/fetch-singbox.sh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # awg-shim (userspace AmneziaWG → SOCKS5) собирается из awg-shim/ на Go
+      # внутри fetch-скрипта. Пока только Windows: на macOS AmneziaWG — awg-quick.
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: awg-shim/go.sum
+
+      - name: Fetch sing-box and platform binaries
+        run: ${{ matrix.fetch }}
+
+      - name: Build AmneziaWG engine for macOS
+        if: runner.os == 'macOS'
+        run: bash scripts/fetch-awg-macos.sh
+
+      - name: Build application
+        run: npm run tauri build
+
+      # Инсталлеры Windows: MSI (WiX) + NSIS-setup.exe
+      - name: Upload Windows installers
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unigate-${{ matrix.label }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+
+      # Инсталлер macOS: .dmg (неподписанный — Gatekeeper потребует
+      # «ПКМ → Открыть» при первом запуске; подпись/нотаризация — отдельно)
+      - name: Upload macOS installer
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unigate-${{ matrix.label }}
+          if-no-files-found: error
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+
+  # Публикуем Release только на теге v* и только когда ОБЕ сборки удачны
+  # (needs: build). Один джоб собирает артефакты обеих ОС в единый релиз —
+  # без гонки параллельных загрузок.
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # создать/обновить Release и залить в него файлы
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts # каждая сборка попадёт в свой подкаталог
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # артефакты обеих ОС: artifacts/unigate-windows/*, unigate-macos-arm64/*
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -1,0 +1,745 @@
+/* ===== Дизайн-система: переменные ===== */
+:root,
+[data-theme="light"] {
+  --bg: #eef1f6;
+  --bg-2: #e3e7ef;
+  --card: #ffffff;
+  --card-2: #f6f8fb;
+  --text: #1b1f27;
+  --muted: #6b7280;
+  --border: #e2e6ec;
+  --accent: #2f6bff;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(47, 107, 255, 0.1);
+  --ok: #12864a;
+  --ok-soft: rgba(18, 134, 74, 0.12);
+  --warn: #b06000;
+  --warn-soft: #fff6e6;
+  --danger: #d23a3a;
+  --shadow: 0 1px 3px rgba(20, 25, 40, 0.08), 0 8px 24px rgba(20, 25, 40, 0.06);
+}
+
+[data-theme="dark"] {
+  --bg: #0e1016;
+  --bg-2: #0a0c11;
+  --card: #171b23;
+  --card-2: #1e232d;
+  --text: #e6e9f0;
+  --muted: #929aa8;
+  --border: #262c37;
+  --accent: #4d84ff;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(77, 132, 255, 0.16);
+  --ok: #3ecf8e;
+  --ok-soft: rgba(62, 207, 142, 0.14);
+  --warn: #e0a44a;
+  --warn-soft: rgba(224, 164, 74, 0.12);
+  --danger: #ff6b6b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Inter, "Segoe UI", Avenir, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===== Кастомная шапка окна (frameless) ===== */
+.window-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.titlebar {
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.titlebar-controls {
+  display: flex;
+}
+
+.titlebar-btn {
+  width: 46px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  border-radius: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.titlebar-btn:hover {
+  background: var(--card-2);
+  color: var(--text);
+}
+
+.titlebar-btn.close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ===== Каркас: сайдбар + контент ===== */
+.app {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 0.75rem;
+  gap: 1rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+.brand-logo {
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
+  border-radius: 0.4rem;
+  flex-shrink: 0;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 9px;
+  font-size: 0.92rem;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.nav-item:hover {
+  background: var(--card-2);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-icon {
+  font-size: 1rem;
+}
+
+.nav-item .dot {
+  margin-left: auto;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: 0.4rem 0.5rem;
+}
+
+.core-badge {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.core-badge.err {
+  color: var(--danger);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  display: inline-block;
+}
+
+.dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+.dot.busy {
+  background: var(--warn);
+}
+
+.dot.err {
+  background: var(--danger);
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem 1.75rem;
+}
+
+/* ===== Карточки ===== */
+.card,
+.core-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem 1.4rem;
+  box-shadow: var(--shadow);
+  max-width: 760px;
+}
+
+.connection-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-width: 760px;
+}
+
+.profile-picker-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 58px;
+  padding: 0.65rem 0.8rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.profile-picker-card label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.profile-picker-card select {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-picker-actions,
+.conn-profile-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.compact-editor,
+.connection-share {
+  max-width: none;
+}
+
+.conn-layout {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.conn-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.conn-logo {
+  flex: 0 0 auto;
+  width: 190px;
+  height: 190px;
+  object-fit: contain;
+  opacity: 0.85;
+  filter: grayscale(0.35);
+  transition:
+    opacity 0.25s ease,
+    filter 0.25s ease;
+}
+
+.conn-logo.on {
+  opacity: 1;
+  filter: none;
+}
+
+.card h2,
+.core-card h2 {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.panel-head h2 {
+  margin: 0;
+}
+
+.panel-head-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* ===== Кнопки ===== */
+button {
+  font-family: inherit;
+  font-size: 0.88rem;
+  padding: 0.42rem 0.8rem;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.danger,
+button.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: transparent;
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
+button.big {
+  padding: 0.7rem 1.6rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 11px;
+  min-width: 200px;
+}
+
+button.big.primary,
+button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+button.big.primary:hover:not(:disabled),
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  color: var(--accent-fg);
+}
+
+.warn-action {
+  align-self: flex-start;
+  background: var(--warn);
+  color: #fff;
+  border-color: var(--warn);
+}
+
+/* ===== Поля ввода ===== */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input:not([type]),
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+/* ===== Формы ===== */
+.settings,
+.form-grid,
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.settings label,
+.form-grid label,
+.profile-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.settings label.checkbox,
+.form-grid label.checkbox,
+.profile-form label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+}
+
+.form-grid input,
+.form-grid select,
+.settings select,
+.profile-form input,
+.profile-form select {
+  color: var(--text);
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.profile-actions button {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+.row-2 {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.row-2 > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.advanced {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.6rem 0.8rem;
+  background: var(--card-2);
+}
+
+.advanced summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+  user-select: none;
+}
+
+.advanced[open] summary {
+  margin-bottom: 0.6rem;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* ===== Текстовые статусы ===== */
+.hint {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.error {
+  color: var(--danger);
+  word-break: break-word;
+}
+
+.ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.warn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  color: var(--warn);
+}
+
+/* ===== Список профилей / подписок ===== */
+.profile-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.profile {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card-2);
+}
+
+.profile.active {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.profile-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profile-sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-radius: 6px;
+  padding: 0.1rem 0.45rem;
+}
+
+.auth-badge {
+  margin-left: 0.35rem;
+  cursor: help;
+}
+
+/* ===== Подключение ===== */
+.conn-profile {
+  font-weight: 600;
+  font-size: 1.15rem;
+  margin: 0.25rem 0;
+}
+
+.conn-address {
+  margin: 0.1rem 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.conn-profile-actions {
+  margin-bottom: 0.7rem;
+}
+
+.conn-status {
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0.9rem;
+  color: var(--muted);
+}
+
+.conn-status.connected {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.conn-status.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.conn-status.connecting,
+.conn-status.disconnecting {
+  color: var(--warn);
+}
+
+.traffic {
+  margin-top: 1rem;
+}
+
+.traffic-speeds {
+  display: flex;
+  gap: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.traffic-speeds .speed {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.traffic-speeds .down {
+  color: var(--accent);
+}
+
+.traffic-speeds .up {
+  color: var(--ok);
+}
+
+.traffic-totals {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Импорт / поделиться / приложения ===== */
+.import-input {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.share-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card-2);
+}
+
+.share-box .import-input {
+  width: 100%;
+}
+
+.share-box button {
+  align-self: flex-start;
+}
+
+.share-formats {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.share-formats button {
+  align-self: auto;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.share-formats button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.share-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.apps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.app-add {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.app-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 9.5rem;
+  overflow-y: auto;
+}
+
+.app-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: var(--card-2);
+}
+
+.app-list button.danger {
+  padding: 0.1rem 0.45rem;
+}
