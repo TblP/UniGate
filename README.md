@@ -90,17 +90,6 @@ npm run tauri build              # сборка (Windows → MSI + NSIS)
 * [x] macOS — proxy и TUN (весь трафик, RU-обход, LAN, split по приложениям), сборка `.dmg` (неподписанный и надо sudo xattr -dr com.apple.quarantine /Applications/UniGate.app)
 * [ ] Локализация RU/EN, автообновление
 
-## Windows версия: 
-
-<img width="1183" height="899" alt="Снимок экрана 2026-07-05 190423" src="https://github.com/user-attachments/assets/1e13ef80-d3d2-4e45-953e-3ead811b33e8" />
-
-<img width="1198" height="903" alt="Снимок экрана 2026-07-05 190417" src="https://github.com/user-attachments/assets/cd697862-0a39-4a2e-983e-4fecec69a796" />
-
-<img width="1197" height="899" alt="Снимок экрана 2026-07-05 190430" src="https://github.com/user-attachments/assets/be32f658-83d0-4ed4-90a2-5a47daac9546" />
-
-<img width="1191" height="894" alt="Снимок экрана 2026-07-05 190436" src="https://github.com/user-attachments/assets/d5ed7da9-918c-4c2b-986e-9032c29578fc" />
-
-
 
 
 
