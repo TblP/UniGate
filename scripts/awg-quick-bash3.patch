@@ -19,6 +19,26 @@ diff --git a/src/wg-quick/darwin.bash b/src/wg-quick/darwin.bash
  
  CONFIG_SEARCH_PATHS=( /etc/amnezia/amneziawg /usr/local/etc/amnezia/amneziawg )
  
+@@ -113,7 +117,7 @@ get_real_interface() {
+ 	[[ -f "/var/run/amneziawg/$INTERFACE.name" ]] || return 1
+ 	interface="$(< "/var/run/amneziawg/$INTERFACE.name")"
+ 	[[ -n $interface && -S "/var/run/amneziawg/$interface.sock" ]] || return 1
+-	diff=$(( $(stat -f %m "/var/run/amneziawg/$interface.sock" 2>/dev/null || echo 200) - $(stat -f %m "/var/run/wireguard/$INTERFACE.name" 2>/dev/null || echo 100) ))
++	diff=$(( $(stat -f %m "/var/run/amneziawg/$interface.sock" 2>/dev/null || echo 200) - $(stat -f %m "/var/run/amneziawg/$INTERFACE.name" 2>/dev/null || echo 100) ))
+ 	[[ $diff -ge 2 || $diff -le -2 ]] && return 1
+ 	REAL_INTERFACE="$interface"
+ 	echo "[+] Interface for $INTERFACE is $REAL_INTERFACE" >&2
+@@ -153,8 +157,8 @@ del_routes() {
+ }
+ 
+ del_if() {
+-	[[ -z $REAL_INTERFACE ]] || cmd rm -f "/var/run/wireguard/$REAL_INTERFACE.sock"
+-	cmd rm -f "/var/run/wireguard/$INTERFACE.name"
++	[[ -z $REAL_INTERFACE ]] || cmd rm -f "/var/run/amneziawg/$REAL_INTERFACE.sock"
++	cmd rm -f "/var/run/amneziawg/$INTERFACE.name"
+ }
+ 
+ up_if() {
 @@ -215,29 +219,57 @@ collect_endpoints() {
  	done < <(wg show "$REAL_INTERFACE" endpoints)
  }

@@ -981,6 +981,12 @@ async fn connect_amneziawg(app: &AppHandle, config: &str) -> Result<ConnectionSt
         set_state(app, ConnectionState::Error { message: m.clone() });
         return Err(m);
     }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("не удалось защитить {AWG_CONF}: {e}"))?;
+    }
 
     let cp = conf_path.to_string_lossy().into_owned();
 
