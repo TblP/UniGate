@@ -66,6 +66,7 @@ if [ -f "$BIN_DIR/awg" ] && [ -f "$BIN_DIR/awg-quick" ]; then
 else
   echo "Собираю amneziawg-tools (awg)…"
   git clone --depth 1 --branch "$TOOLS_VERSION" "$TOOLS_REPO" "$tmp/awg-tools"
+  git -C "$tmp/awg-tools" apply --recount "$ROOT/scripts/awg-quick-bash3.patch"
   # Цель сборки называется `wg`, а `make install` штатно переименовывает её в
   # `awg` и устанавливает правильный darwin-вариант как `awg-quick`.
   install_root="$tmp/awg-install"
