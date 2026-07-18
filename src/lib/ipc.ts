@@ -43,7 +43,7 @@ export const ipc = {
   importProfile: (input: string, name?: string) =>
     invoke<Profile>("import_profile", { input, name: name ?? null }),
 
-  /** Экспортирует профиль: format="link" — share-ссылка, "json" — sing-box JSON. */
+  /** Экспортирует профиль: format="link" — share-ссылка (включая vpn:// для AWG), "json" — конфиг. */
   exportProfile: (id: string, format: "link" | "json") =>
     invoke<string>("export_profile", { id, format }),
 

@@ -1,11 +1,12 @@
 //! Экспорт профиля в share-ссылку (обратное к [`crate::import`]).
 //!
 //! Протоколы со ссылками (hysteria2/vless/vmess/ss/trojan/tuic) → соответствующий
-//! URL; socks/http → JSON sing-box outbound; AmneziaWG → его `.conf`.
+//! URL; socks/http → JSON sing-box outbound; AmneziaWG → `vpn://`.
 
 use crate::models::{Outbound, TlsOpts, Transport};
 use base64::{engine::general_purpose, Engine};
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+use std::io::Write;
 
 // кодируем всё, кроме безопасных символов
 const ESCAPE: &AsciiSet = &CONTROLS
@@ -84,6 +85,42 @@ fn transport_query(transport: &Option<Transport>) -> Vec<(&'static str, String)>
             q
         }
     }
+}
+
+/// Упаковывает AmneziaWG-конфиг в совместимый с нашим импортом контейнер
+/// `vpn://base64url(qCompress(JSON))`. В `.conf` уже находятся endpoint,
+/// ключи и все параметры обфускации, поэтому ссылка полностью обратима.
+fn amnezia_link(name: &str, config: &str, server: &str, port: u16) -> String {
+    let last_config = serde_json::json!({ "config": config }).to_string();
+    let container = serde_json::json!({
+        "defaultContainer": "amnezia-awg2",
+        "description": name,
+        "hostName": server,
+        "dns1": "1.1.1.1",
+        "dns2": "1.0.0.1",
+        "containers": [{
+            "container": "amnezia-awg2",
+            "awg": {
+                "last_config": last_config,
+                "port": port.to_string(),
+                "protocol_version": 2
+            }
+        }]
+    })
+    .to_string();
+
+    let mut encoder =
+        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(container.as_bytes())
+        .expect("zlib write to Vec cannot fail");
+    let compressed = encoder.finish().expect("zlib finish to Vec cannot fail");
+    let mut packed = (container.len() as u32).to_be_bytes().to_vec();
+    packed.extend_from_slice(&compressed);
+    format!(
+        "vpn://{}",
+        general_purpose::URL_SAFE_NO_PAD.encode(packed)
+    )
 }
 
 /// JSON-представление профиля — sing-box outbound-объект (для вставки в конфиг
@@ -176,8 +213,11 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
             serde_json::to_string_pretty(&crate::config::outbound_to_singbox(outbound))
                 .unwrap_or_default()
         }
-        // AmneziaWG → его .conf (импортируется в любой AWG-клиент)
-        Outbound::AmneziaWg { config, .. } => config.clone(),
+        Outbound::AmneziaWg {
+            config,
+            server,
+            port,
+        } => amnezia_link(name, config, server, *port),
     }
 }
 
@@ -287,5 +327,18 @@ mod tests {
                 }),
             },
         );
+    }
+
+    #[test]
+    fn roundtrip_amneziawg_vpn_link() {
+        let outbound = Outbound::AmneziaWg {
+            config: "[Interface]\nAddress = 10.8.1.7/32\nPrivateKey = KEY\nJc = 5\nI1 = <b 0x01>\nI2 =\n[Peer]\nPublicKey = PUB\nEndpoint = 1.2.3.4:34196\nAllowedIPs = 0.0.0.0/0, ::/0\n".into(),
+            server: "1.2.3.4".into(),
+            port: 34196,
+        };
+
+        let link = to_share("FR-AWG", &outbound);
+        assert!(link.starts_with("vpn://"));
+        roundtrip("FR-AWG", outbound);
     }
 }

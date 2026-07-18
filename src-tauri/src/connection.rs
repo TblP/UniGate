@@ -575,6 +575,68 @@ pub fn local_proxy_addr() -> String {
     format!("127.0.0.1:{LOCAL_PORT}")
 }
 
+/// Windows + совместная работа с другим VPN: sing-box назначает TUN-адаптеру
+/// служебный DNS (следующий адрес после 198.18.0.1), и Windows ставит этот
+/// интерфейс первым. OpenVPN Connect с защитой от DNS-утечек блокирует запросы к
+/// чужому TUN-DNS, хотя его собственные DNS через TAP/DCO доступны.
+///
+/// После создания адаптера очищаем его DNS и поднимаем interface metric: тогда
+/// Windows выбирает DNS активного OpenVPN (либо физической сети), а более
+/// специфичные auto_route-маршруты UniGate продолжают перехватывать обычный
+/// трафик. Настройки относятся к ActiveStore и исчезают вместе с адаптером.
+#[cfg(target_os = "windows")]
+async fn release_tun_dns_to_system() -> Result<(), String> {
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$deadline = [DateTime]::UtcNow.AddSeconds(5)
+do {
+  $tun = Get-NetIPAddress -AddressFamily IPv4 -IPAddress '198.18.0.1' -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($null -ne $tun) {
+    Set-DnsClientServerAddress -InterfaceIndex $tun.InterfaceIndex -ResetServerAddresses
+    Set-NetIPInterface -InterfaceIndex $tun.InterfaceIndex -AddressFamily IPv4 -InterfaceMetric 5000
+    exit 0
+  }
+  Start-Sleep -Milliseconds 100
+} while ([DateTime]::UtcNow -lt $deadline)
+Write-Error 'TUN interface 198.18.0.1 was not found'
+exit 1
+"#;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("не удалось настроить DNS TUN: {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if stderr.is_empty() {
+                format!(
+                    "настройка DNS TUN завершилась с кодом {:?}",
+                    output.status.code()
+                )
+            } else {
+                format!("не удалось освободить DNS TUN: {stderr}")
+            })
+        }
+    })
+    .await
+    .map_err(|e| format!("задача настройки DNS TUN завершилась с ошибкой: {e}"))?
+}
+
 #[tauri::command]
 pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionState, String> {
     {
@@ -805,6 +867,21 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         guard.state = ConnectionState::Connected;
     }
 
+    // При явно включённой совместимости корпоративные сети и DNS должны
+    // оставаться за нативным OpenVPN-адаптером. Делаем после spawn: только
+    // теперь существует tun0.
+    #[cfg(target_os = "windows")]
+    if mode == Mode::Tun
+        && settings.routing.bypass_lan
+        && settings.routing.vpn_compatibility
+    {
+        if let Err(e) = release_tun_dns_to_system().await {
+            // Best-effort: без OpenVPN само подключение UniGate остаётся рабочим,
+            // поэтому не роняем сессию из-за системной настройки DNS.
+            eprintln!("[tun-dns] {e}");
+        }
+    }
+
     // системный прокси ставим только в proxy-режиме (в TUN роутит сам адаптер)
     if mode == Mode::Proxy {
         if let Err(e) = sysproxy::enable(LOCAL_PORT) {
@@ -964,6 +1041,34 @@ fn connect_tun_macos(app: &AppHandle, cfg_path: &std::path::Path) -> Result<Conn
 /// Подключение через движок AmneziaWG. Windows — `amneziawg.exe
 /// /installtunnelservice`; macOS — `awg-quick up` (amneziawg-go userspace).
 /// Всегда требует прав администратора; статистики Clash API у него нет.
+#[cfg(any(target_os = "macos", test))]
+fn normalize_awg_config_for_macos(config: &str) -> String {
+    let is_empty_concealment = |line: &str| {
+        let Some((key, value)) = line.trim().split_once('=') else {
+            return false;
+        };
+        let key = key.trim().as_bytes();
+        let is_i1_i5 = key.len() == 2
+            && key[0].eq_ignore_ascii_case(&b'i')
+            && matches!(key[1], b'1'..=b'5');
+        let value = value.trim();
+        is_i1_i5 && (value.is_empty() || value == "''" || value == "\"\"")
+    };
+
+    let mut normalized = String::with_capacity(config.len());
+    for segment in config.split_inclusive('\n') {
+        let line = segment
+            .strip_suffix('\n')
+            .unwrap_or(segment)
+            .strip_suffix('\r')
+            .unwrap_or_else(|| segment.strip_suffix('\n').unwrap_or(segment));
+        if !is_empty_concealment(line) {
+            normalized.push_str(segment);
+        }
+    }
+    normalized
+}
+
 async fn connect_amneziawg(app: &AppHandle, config: &str) -> Result<ConnectionState, String> {
     // macOS не блокируем: там awg-quick поднимается от root через osascript
     // (нативный запрос пароля), приложение может оставаться обычным.
@@ -976,7 +1081,15 @@ async fn connect_amneziawg(app: &AppHandle, config: &str) -> Result<ConnectionSt
     set_state(app, ConnectionState::Connecting);
 
     let conf_path = storage::path(app, AWG_CONF)?;
-    if let Err(e) = std::fs::write(&conf_path, config) {
+    // awg(8) on Unix rejects explicit empty AWG 2.0 concealment fields (`I2 =`),
+    // while an omitted field has the same zero-value semantics. Amnezia containers
+    // commonly emit empty I2-I5, so remove only empty I1-I5 on macOS. Filled
+    // concealment packets and the stored/exported profile remain untouched.
+    #[cfg(target_os = "macos")]
+    let config_to_write = normalize_awg_config_for_macos(config);
+    #[cfg(not(target_os = "macos"))]
+    let config_to_write = config;
+    if let Err(e) = std::fs::write(&conf_path, config_to_write) {
         let m = format!("не удалось записать {AWG_CONF}: {e}");
         set_state(app, ConnectionState::Error { message: m.clone() });
         return Err(m);
@@ -1148,4 +1261,28 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
 
     set_state(&app, ConnectionState::Disconnected);
     Ok(ConnectionState::Disconnected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_awg_config_for_macos;
+
+    #[test]
+    fn macos_awg_drops_only_empty_concealment_packets() {
+        let config = "[Interface]\r\nI1 = <b 0x01>\r\nI2 =\r\nI3 = ''\r\nI4 = \"\"\r\nI5 = <b 0x05>\r\nJc = 5\r\n[Peer]\r\nPublicKey = PUB\r\n";
+        let normalized = normalize_awg_config_for_macos(config);
+
+        assert!(normalized.contains("I1 = <b 0x01>\r\n"));
+        assert!(normalized.contains("I5 = <b 0x05>\r\n"));
+        assert!(normalized.contains("Jc = 5\r\n"));
+        assert!(!normalized.contains("I2 ="));
+        assert!(!normalized.contains("I3 ="));
+        assert!(!normalized.contains("I4 ="));
+    }
+
+    #[test]
+    fn macos_awg_preserves_config_without_empty_i_fields_exactly() {
+        let config = "[Interface]\nI2 = <b 0x02>\n[Peer]\nEndpoint = 1.2.3.4:1234";
+        assert_eq!(normalize_awg_config_for_macos(config), config);
+    }
 }

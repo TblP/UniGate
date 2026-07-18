@@ -259,6 +259,11 @@ pub enum AppMode {
 pub struct Routing {
     /// LAN (приватные IP) — напрямую, мимо туннеля.
     pub bypass_lan: bool,
+    /// Windows: совместимость с одновременно активным OpenVPN/другим VPN.
+    /// Освобождает системный DNS из TUN, поэтому включается только осознанно
+    /// вместе с `bypass_lan` и по умолчанию выключена.
+    #[serde(default)]
+    pub vpn_compatibility: bool,
     /// RU-трафик (geoip-ru + домены .ru/.рф/.su) — напрямую.
     pub bypass_ru: bool,
     /// Режим по приложениям.

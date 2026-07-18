@@ -225,7 +225,7 @@ pub fn delete_subscription(app: tauri::AppHandle, id: String) -> Result<(), Stri
 
 /// Экспортирует профиль в выбранном формате: `"link"` — share-ссылка
 /// (vless://…, для socks/http ссылки нет → JSON-фолбэк), `"json"` — sing-box
-/// outbound JSON (AmneziaWG в обоих форматах отдаёт свой `.conf`).
+/// outbound JSON. AmneziaWG в формате `link` отдаёт упакованную `vpn://`-ссылку.
 #[tauri::command]
 pub fn export_profile(
     app: tauri::AppHandle,

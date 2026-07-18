@@ -100,17 +100,29 @@ fn generate_tun(
         rules.push(json!({ "rule_set": ["geoip-ru"], "outbound": "direct" }));
         rules.push(json!({ "domain_suffix": [".ru", ".рф", ".su"], "outbound": "direct" }));
     }
-    // split по приложениям (у каждого режима свой список)
-    let final_out = match routing.app_mode {
+    // split по приложениям (у каждого режима свой список). DNS следует той же
+    // развилке: в Only непроксируемые приложения резолвятся локально, в Except
+    // выбранные direct-приложения получают локальный DNS отдельным правилом.
+    // Иначе direct-трафик зависел бы от DoH через VPN и мог получать ответы для
+    // другого региона либо вообще терять резолв при проблемах туннеля.
+    let (final_out, dns_final, app_dns_rules) = match routing.app_mode {
         AppMode::Only if !routing.only_apps.is_empty() => {
             rules.extend(per_app_rules(&routing.only_apps, "proxy"));
-            "direct" // остальные — напрямую
+            (
+                "direct", // остальные — напрямую
+                "local",  // и резолвятся через локальную сеть
+                per_app_dns_rules(&routing.only_apps, "remote"),
+            )
         }
         AppMode::Except if !routing.except_apps.is_empty() => {
             rules.extend(per_app_rules(&routing.except_apps, "direct"));
-            "proxy" // остальные — через туннель
+            (
+                "proxy", // остальные — через туннель
+                "remote",
+                per_app_dns_rules(&routing.except_apps, "local"),
+            )
         }
-        _ => "proxy",
+        _ => ("proxy", "remote", Vec::new()),
     };
 
     // DNS-серверы. `remote` — для проксируемого трафика (через туннель).
@@ -176,9 +188,16 @@ fn generate_tun(
 
     let mut dns = json!({
         "servers": servers,
-        "final": "remote",
+        "final": dns_final,
         "strategy": "ipv4_only"
     });
+    // При split один и тот же домен может резолвиться разными серверами для
+    // разных приложений. Не даём ответу из remote-кэша попасть в local-запрос
+    // (и наоборот). Опция поддерживается нашей закреплённой версией 1.13.x.
+    if use_ru || !app_dns_rules.is_empty() {
+        dns["independent_cache"] = json!(true);
+    }
+    let mut dns_rules: Vec<Value> = Vec::new();
     // RU-домены резолвим напрямую (через `local`, мимо туннеля): адрес совпадает
     // с тем, куда пойдёт direct-трафик (route rule_set geoip-ru срабатывает), а
     // главное — резолв НЕ зависит от туннеля. Иначе .ru-домен (например,
@@ -186,13 +205,24 @@ fn generate_tun(
     // висит по 20-40 с — игра не находит свой шлюз, хотя маршрут для неё direct.
     // Раньше было только на macOS; на Windows .ru молча резолвился через туннель.
     if use_ru {
-        dns["rules"] = json!([
-            { "domain_suffix": [".ru", ".рф", ".su"], "server": "local" }
-        ]);
+        dns_rules.push(json!({
+            "domain_suffix": [".ru", ".рф", ".su"],
+            "action": "route",
+            "server": "local"
+        }));
+    }
+    // Глобальные обходы имеют тот же приоритет, что и в route: RU сначала,
+    // затем правила выбранных приложений.
+    dns_rules.extend(app_dns_rules);
+    if !dns_rules.is_empty() {
+        dns["rules"] = json!(dns_rules);
     }
 
-    // Адрес tun. Windows — как было (проверенный конфиг). macOS/прочие — плюс
-    // IPv6, но ТОЛЬКО если у системы реально есть IPv6-маршрут (`tun_ipv6`):
+    // Адрес tun берём из зарезервированной benchmark-сети 198.18.0.0/15, а не
+    // из RFC1918. Иначе обход корпоративной сети 172.16.0.0/12 (OpenVPN)
+    // одновременно исключает собственный 172.18.0.0/30 и ломает весь TUN.
+    // macOS/прочие — плюс IPv6, но ТОЛЬКО если у системы реально есть
+    // IPv6-маршрут (`tun_ipv6`):
     // - есть IPv6: без перехвата auto_route забирает только IPv4-маршрут, а
     //   IPv6-трафик (браузеры со своим DoH получают AAAA мимо нашего hijack-dns)
     //   уходит в обход туннеля → заблокированные сайты «иногда не открываются»;
@@ -201,25 +231,47 @@ fn generate_tun(
     //   его никуда доставить → мгновенный разрыв (ERR_CONNECTION_CLOSED на
     //   ya.ru при включённом RU-обходе). Утечь IPv6 тут и так не может.
     #[cfg(target_os = "windows")]
-    let tun_address = json!(["172.18.0.1/30"]);
+    let tun_address = json!(["198.18.0.1/30"]);
     #[cfg(not(target_os = "windows"))]
     let tun_address = if tun_ipv6 {
-        json!(["172.18.0.1/30", "fdfe:dcba:9876::1/126"])
+        json!(["198.18.0.1/30", "fdfe:dcba:9876::1/126"])
     } else {
-        json!(["172.18.0.1/30"])
+        json!(["198.18.0.1/30"])
     };
+
+    let mut tun_inbound = json!({
+        "type": "tun",
+        "tag": "tun-in",
+        "address": tun_address,
+        "auto_route": true,
+        // На Windows strict_route ставит WFP-фильтр, который запрещает DNS:53
+        // через любой интерфейс кроме нашего TUN. Это несовместимо с OpenVPN
+        // Connect: его DNS обязан идти через TAP/DCO. Отдельная опция
+        // vpn_compatibility вместе с обходом LAN оставляет нативные маршруты
+        // другого VPN и снимает только этот строгий DNS-фильтр; маршруты
+        // UniGate по-прежнему задаёт auto_route.
+        "strict_route": !(cfg!(target_os = "windows")
+            && routing.bypass_lan
+            && routing.vpn_compatibility),
+        "stack": stack.as_singbox()
+    });
+    if routing.bypass_lan {
+        // Исключаем RFC1918 из маршрутов TUN на уровне ОС, а не только выбираем
+        // direct-outbound после захвата. Так более специфичные маршруты других
+        // VPN (OpenVPN/TAP/Wintun) остаются нативными и не переоткрываются
+        // sing-box через физический интерфейс. В частности, это сохраняет
+        // рабочие сети 10.240.0.0/24 и 172.16.0.0/12 из OpenVPN.
+        tun_inbound["route_exclude_address"] = json!([
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16"
+        ]);
+    }
 
     json!({
         "log": { "level": "warn", "timestamp": true },
         "dns": dns,
-        "inbounds": [{
-            "type": "tun",
-            "tag": "tun-in",
-            "address": tun_address,
-            "auto_route": true,
-            "strict_route": true,
-            "stack": stack.as_singbox()
-        }],
+        "inbounds": [tun_inbound],
         "outbounds": [
             outbound_to_json(&profile.outbound),
             { "type": "direct", "tag": "direct" }
@@ -243,6 +295,28 @@ fn per_app_rules(apps: &[String], outbound: &str) -> Vec<Value> {
         let mut rules = rules;
         let patterns: Vec<String> = apps.iter().map(|a| app_bundle_regex(a)).collect();
         rules.push(json!({ "process_path_regex": patterns, "outbound": outbound }));
+        rules
+    };
+    rules
+}
+
+/// DNS-правила split по приложениям. Повторяют process-matching route-правил,
+/// но выбирают DNS-сервер вместо outbound.
+fn per_app_dns_rules(apps: &[String], server: &str) -> Vec<Value> {
+    let rules = vec![json!({
+        "process_name": apps,
+        "action": "route",
+        "server": server
+    })];
+    #[cfg(target_os = "macos")]
+    let rules = {
+        let mut rules = rules;
+        let patterns: Vec<String> = apps.iter().map(|a| app_bundle_regex(a)).collect();
+        rules.push(json!({
+            "process_path_regex": patterns,
+            "action": "route",
+            "server": server
+        }));
         rules
     };
     rules
@@ -534,19 +608,71 @@ mod tests {
     fn tun_routing_ru_lan_apps_only() {
         let routing = Routing {
             bypass_lan: true,
+            vpn_compatibility: true,
             bypass_ru: true,
             app_mode: AppMode::Only,
             only_apps: vec!["telegram.exe".into()],
             except_apps: vec![],
         };
-        let cfg = generate(&socks_profile(), Mode::Tun, 2080, &routing, Some("C:/x/geoip-ru.srs"), &[], false, TunStack::Gvisor);
+        let cfg = generate(
+            &socks_profile(),
+            Mode::Tun,
+            2080,
+            &routing,
+            Some("C:/x/geoip-ru.srs"),
+            &[],
+            false,
+            TunStack::Gvisor,
+        );
         let s = serde_json::to_string(&cfg).unwrap();
         assert!(s.contains("ip_is_private"));
         assert!(s.contains("geoip-ru"));
         assert!(s.contains("telegram.exe"));
         assert_eq!(cfg["route"]["final"], "direct"); // Only → остальные напрямую
+        assert_eq!(cfg["inbounds"][0]["address"][0], "198.18.0.1/30");
+        #[cfg(target_os = "windows")]
+        assert_eq!(cfg["inbounds"][0]["strict_route"], false);
+        assert_eq!(
+            cfg["inbounds"][0]["route_exclude_address"][1],
+            "172.16.0.0/12"
+        );
         assert!(cfg["route"]["rule_set"].is_array());
-        // RU-домены резолвятся через прямой DNS
+        // RU-домены имеют приоритет и резолвятся напрямую; DNS выбранного
+        // приложения идёт через VPN, DNS остальных — локально.
+        assert_eq!(cfg["dns"]["final"], "local");
+        assert_eq!(cfg["dns"]["independent_cache"], true);
+        assert_eq!(cfg["dns"]["rules"][0]["server"], "local");
+        assert_eq!(cfg["dns"]["rules"][1]["process_name"][0], "telegram.exe");
+        assert_eq!(cfg["dns"]["rules"][1]["server"], "remote");
+    }
+
+    #[test]
+    fn tun_routing_apps_except_splits_dns_too() {
+        let routing = Routing {
+            bypass_lan: false,
+            vpn_compatibility: false,
+            bypass_ru: false,
+            app_mode: AppMode::Except,
+            only_apps: vec![],
+            except_apps: vec!["horizon-client.exe".into()],
+        };
+        let cfg = generate(
+            &socks_profile(),
+            Mode::Tun,
+            2080,
+            &routing,
+            None,
+            &[],
+            false,
+            TunStack::Gvisor,
+        );
+        assert_eq!(cfg["route"]["final"], "proxy");
+        assert_eq!(cfg["dns"]["final"], "remote");
+        assert_eq!(cfg["dns"]["independent_cache"], true);
+        assert_eq!(
+            cfg["dns"]["rules"][0]["process_name"][0],
+            "horizon-client.exe"
+        );
         assert_eq!(cfg["dns"]["rules"][0]["server"], "local");
     }
 
@@ -565,8 +691,44 @@ mod tests {
     fn tun_routing_off_defaults_to_proxy() {
         let cfg = generate(&socks_profile(), Mode::Tun, 2080, &Routing::default(), None, &[], false, TunStack::Gvisor);
         assert_eq!(cfg["route"]["final"], "proxy");
+        assert_eq!(cfg["dns"]["final"], "remote");
         assert!(cfg["route"].get("rule_set").is_none());
         assert!(cfg["dns"].get("rules").is_none());
+        assert!(cfg["inbounds"][0].get("route_exclude_address").is_none());
+        assert_eq!(cfg["inbounds"][0]["strict_route"], true);
+    }
+
+    #[test]
+    fn tun_lan_bypass_keeps_strict_dns_without_vpn_compatibility() {
+        let routing = Routing {
+            bypass_lan: true,
+            ..Routing::default()
+        };
+        let cfg = generate(
+            &socks_profile(),
+            Mode::Tun,
+            2080,
+            &routing,
+            None,
+            &[],
+            false,
+            TunStack::Gvisor,
+        );
+        assert_eq!(cfg["inbounds"][0]["strict_route"], true);
+        assert!(cfg["inbounds"][0]["route_exclude_address"].is_array());
+    }
+
+    #[test]
+    fn old_routing_settings_default_vpn_compatibility_to_off() {
+        let routing: Routing = serde_json::from_value(json!({
+            "bypassLan": true,
+            "bypassRu": true,
+            "appMode": "off",
+            "onlyApps": [],
+            "exceptApps": []
+        }))
+        .unwrap();
+        assert!(!routing.vpn_compatibility);
     }
 
     #[test]

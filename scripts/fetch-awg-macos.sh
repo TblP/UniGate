@@ -37,10 +37,18 @@ BIN_DIR="$ROOT/src-tauri/binaries"
 mkdir -p "$BIN_DIR"
 
 STAMP="$BIN_DIR/.awg-macos-version"
-EXPECTED_VERSION="amneziawg-go=$GO_VERSION amneziawg-tools=$TOOLS_VERSION"
+PATCH_HASH="$(git hash-object "$ROOT/scripts/awg-quick-bash3.patch")"
+EXPECTED_VERSION="amneziawg-go=$GO_VERSION amneziawg-tools=$TOOLS_VERSION patch=$PATCH_HASH"
 if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$EXPECTED_VERSION" ]; then
   echo "Версия движка изменилась — пересобираю macOS AmneziaWG"
   rm -f "$BIN_DIR/amneziawg-go" "$BIN_DIR/awg" "$BIN_DIR/awg-quick" "$STAMP"
+fi
+
+# Старые сборки могли иметь тот же upstream-тег и stamp, но ещё не содержать
+# нашу подмену wg -> awg. Не переиспользуем такой awg-quick.
+if [ -f "$BIN_DIR/awg-quick" ] && ! grep -Fq 'awg "$@"' "$BIN_DIR/awg-quick"; then
+  echo "Патч awg-quick изменился — пересобираю macOS AmneziaWG"
+  rm -f "$BIN_DIR/awg" "$BIN_DIR/awg-quick" "$STAMP"
 fi
 
 tmp="$(mktemp -d)"

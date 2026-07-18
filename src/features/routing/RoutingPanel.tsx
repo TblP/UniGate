@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../store/useAppStore";
-import { isMacOS } from "../../lib/platform";
+import { isMacOS, isWindows } from "../../lib/platform";
 import type { AppMode, Routing } from "../../lib/types";
 
 const APP_MODE_LABEL: Record<AppMode, string> = {
@@ -69,10 +69,35 @@ export function RoutingPanel() {
           <input
             type="checkbox"
             checked={routing.bypassLan}
-            onChange={(e) => patch({ bypassLan: e.target.checked })}
+            onChange={(e) =>
+              patch(
+                e.target.checked
+                  ? { bypassLan: true }
+                  : { bypassLan: false, vpnCompatibility: false }
+              )
+            }
           />
           Локальная сеть (LAN) — напрямую
         </label>
+
+        {isWindows && (
+          <>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={routing.vpnCompatibility}
+                disabled={!routing.bypassLan}
+                onChange={(e) => patch({ vpnCompatibility: e.target.checked })}
+              />
+              Совместимость с другим VPN (OpenVPN)
+            </label>
+            <p className="hint">
+              Только для одновременной работы двух VPN. Системный DNS будет идти
+              через OpenVPN или физическую сеть, а не через UniGate. Требует
+              включённого обхода LAN.
+            </p>
+          </>
+        )}
 
         <label className="checkbox">
           <input

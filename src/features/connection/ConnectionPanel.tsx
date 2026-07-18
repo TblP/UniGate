@@ -9,9 +9,8 @@ import { ImportDialog } from "../profiles/ImportDialog";
 type ShareFormat = "link" | "json";
 
 function shareFormats(outbound: Outbound): ShareFormat[] {
-  return outbound.type === "socks" || outbound.type === "http" || outbound.type === "amnezia_wg"
-    ? ["json"]
-    : ["link", "json"];
+  if (outbound.type === "amnezia_wg") return ["link"];
+  return outbound.type === "socks" || outbound.type === "http" ? ["json"] : ["link", "json"];
 }
 
 function serverAddress(profile: Profile): string {
