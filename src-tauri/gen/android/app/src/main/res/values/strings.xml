@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">"UniGate"</string>
+    <string name="main_activity_title">"UniGate"</string>
+    <string name="shortcut_connect">Подключить</string>
+    <string name="shortcut_connect_long">Подключить UniGate VPN</string>
+    <string name="shortcut_disconnect">Отключить</string>
+    <string name="shortcut_disconnect_long">Отключить UniGate VPN</string>
+    <string name="widget_description">Быстрое подключение UniGate VPN</string>
+    <string name="widget_large_name">UniGate 2×2</string>
+    <string name="widget_compact_name">UniGate Compact 1×1</string>
+    <string name="widget_compact_description">Компактная кнопка UniGate VPN без подписи</string>
+    <string name="widget_toggle">Переключить UniGate VPN</string>
+    <string name="widget_on">Включён</string>
+    <string name="widget_off">Выключен</string>
+    <string name="widget_connecting">Подключение…</string>
+    <string name="tile_label">UniGate VPN</string>
+</resources>

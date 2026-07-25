@@ -261,11 +261,24 @@ fn generate_tun(
         // VPN (OpenVPN/TAP/Wintun) остаются нативными и не переоткрываются
         // sing-box через физический интерфейс. В частности, это сохраняет
         // рабочие сети 10.240.0.0/24 и 172.16.0.0/12 из OpenVPN.
-        tun_inbound["route_exclude_address"] = json!([
-            "10.0.0.0/8",
-            "172.16.0.0/12",
-            "192.168.0.0/16"
-        ]);
+        #[cfg(target_os = "android")]
+        {
+            tun_inbound["route_exclude_address"] = json!([
+                "10.0.0.0/8",
+                "100.64.0.0/10",
+                "169.254.0.0/16",
+                "172.16.0.0/12",
+                "192.168.0.0/16"
+            ]);
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            tun_inbound["route_exclude_address"] = json!([
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16"
+            ]);
+        }
     }
 
     json!({

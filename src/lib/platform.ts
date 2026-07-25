@@ -10,3 +10,12 @@ export const isWindows =
   /Windows|Win32|Win64/i.test(
     navigator.userAgent || (navigator as { platform?: string }).platform || ""
   );
+
+const androidPreview =
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("platform") === "android";
+
+export const isAndroid =
+  typeof navigator !== "undefined" &&
+  (/Android/i.test(navigator.userAgent || "") || androidPreview);

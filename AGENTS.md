@@ -239,6 +239,27 @@ React UI  --IPC-->  Rust (Tauri)  --spawn/JSON-->  sing-box  --сеть-->  ин
 - [ ] **Linux** (TUN обычно проще — CAP_NET_ADMIN/pkexec).
 - **Готово когда:** UniGate ставится и работает на macOS (затем Linux).
 
+### Phase 11 — Android APK 🤖 🚧
+
+- Ветка разработки: `codex/android`; Windows/macOS backend остаётся под `#[cfg(desktop)]`.
+- Android использует не sidecar-процесс, а `sing-box v1.13.14` как `libbox.aar` внутри нативного Kotlin `VpnService`.
+- TUN создаёт `VpnService.Builder`; исходящие сокеты ядра исключаются из петли через `VpnService.protect(fd)`.
+- Split по приложениям на Android делается пакетами: `addAllowedApplication` / `addDisallowedApplication`, а не desktop-правилами `process_name`.
+- **AmneziaWG в APK отсутствует:** профиль скрывается, импорт/создание/подписки его отклоняют.
+- Сейчас собирается ARM64 debug APK (minSdk 24). Полный VPN-сеанс и смена внешнего IP подтверждены на физическом Android-устройстве.
+- Инструменты: `scripts/setup-android.ps1`; сборка libbox: `scripts/build-libbox-android.ps1`; APK без Windows Developer Mode: `scripts/build-android.ps1`.
+- `libbox.aar`, JNI `.so` и Gradle build outputs в git не хранятся.
+- Лицензирование: Android APK линкует GPLv3 sing-box/libbox, поэтому распространение APK требует соблюдения GPLv3 для соответствующей сборки.
+- Android UI живёт отдельно в `src/mobile/` и включается только по Android user-agent; desktop-компоненты и стили не переиспользуются как layout.
+- **Исправление ложного Connected/петли трафика (июль 2026):** Kotlin-плагин ждёт до 30 секунд фактического завершения `CommandServer.startOrReloadService`/`openTun`, и только затем отвечает Rust `started=true`. Ошибка старта возвращается в UI. Default-interface monitor выбирает только физическую сеть с `NET_CAPABILITY_NOT_VPN` (`registerBestMatchingNetworkCallback`/`requestNetwork`), иначе после создания VPN callback мог выбрать сам TUN как внешний интерфейс и зациклить исходящие соединения. Добавлены `ACCESS_NETWORK_STATE` + `CHANGE_NETWORK_STATE`; Android запускает Clash API polling после подтверждённого подключения.
+- `scripts/build-android.ps1` перед сборкой синхронизирует launcher-ресурсы из `src-tauri/icons/android`, чтобы APK использовал ту же иконку UniGate, что desktop-сборки, а не стандартный логотип Tauri.
+- **RU/LAN split на Android (июль 2026):** `geoip-ru.srs` копируется build-скриптом в APK assets, Kotlin-плагин при подключении переносит его в `filesDir` и передаёт Rust реальный путь для генератора sing-box. Раньше Android всегда вызывал генератор с `geoip_ru=None`, поэтому `bypassRu` молча не создавал никаких правил. Для LAN Android дополнительно исключает `100.64.0.0/10` и `169.254.0.0/16`.
+- **Выбор приложений на Android:** ручной ввод package ID удалён. Kotlin-плагин возвращает запускаемые приложения из PackageManager (имя, package ID, PNG-иконка); мобильный bottom sheet показывает поиск и множественный выбор. Видимость launcher-приложений объявлена узким `<queries>` для `MAIN/LAUNCHER`, без `QUERY_ALL_PACKAGES`. Сам split по-прежнему применяется нативно через `VpnService.Builder`.
+- **Производительность app picker (июль 2026):** список больше не загружается при простом переключении `appMode` — только при явном открытии picker. PackageManager/рендер PNG-иконок выполняются в фоновом Kotlin-потоке и кэшируются на время жизни приложения; WebView одновременно отображает не более 50 строк (остальные доступны через поиск). Это устраняет зависание UI на устройствах с большим числом приложений.
+- **Android system surfaces (июль 2026):** общий `VpnQuickControl` сохраняет последний реально запускавшийся конфиг в private SharedPreferences и управляет тремя состояниями `OFF / CONNECTING / ON`. На нём работают: статические launcher shortcuts «Подключить/Отключить»; нативный домашний виджет 1×1 (тёмный+белый / тёмно-зелёный waiting / зелёный+чёрный); `TileService` в Quick Settings. В мобильных настройках есть системные запросы Android 13+ на добавление плитки и launcher API на закрепление виджета (с ручным fallback для HyperOS). Внешние переключения синхронизируются с React/Rust при возврате приложения на экран; зелёное состояние выставляется только после успешного старта libbox.
+- В меню Android зарегистрированы два отдельных widget provider: `UniGate Compact 1×1` (только кнопка, без подписи; `minWidth/minHeight=40dp`, target cell 1×1 для HyperOS) и исходный `UniGate 2×2` с подписью. Кнопка добавления в настройках запрашивает закрепление компактного варианта; большой остаётся доступен через системное меню виджетов. Оба обновляются из одного native-state.
+- **Release pipeline Android:** tag-workflow `.github/workflows/build-installers.yml` собирает отдельный ARM64 debug/self-signed APK на Windows runner, сохраняет debug keystore через Actions cache для совместимости обновлений и публикует файл `UniGate_<version>_android_arm64.apk` рядом с MSI/NSIS/DMG. Доверенной publisher/Play-подписи нет, поэтому Android/Play Protect/HyperOS предупреждает об установке из неизвестного источника. `RELEASE_NOTES.md` используется как оформленное описание релиза.
+
 ## Договорённости
 
 - **Язык общения с пользователем:** русский. Код/идентификаторы/коммиты — английский.

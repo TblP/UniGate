@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AndroidInstalledApp,
   ConnectionState,
   Outbound,
   Profile,
@@ -86,4 +87,16 @@ export const ipc = {
 
   /** Применить настройку «запуск от администратора» (Windows: задача Планировщика). */
   applyAdminLaunch: () => invoke<void>("apply_admin_launch"),
+
+  /** Запускаемые Android-приложения для per-app split picker. */
+  listInstalledApps: () =>
+    invoke<AndroidInstalledApp[]>("list_installed_apps"),
+
+  /** Системный запрос Android 13+ на добавление плитки в быстрые настройки. */
+  requestAndroidQuickTile: () =>
+    invoke<boolean>("request_android_quick_tile"),
+
+  /** Просит Android-лаунчер закрепить домашний виджет UniGate. */
+  requestAndroidWidget: () =>
+    invoke<boolean>("request_android_widget"),
 };

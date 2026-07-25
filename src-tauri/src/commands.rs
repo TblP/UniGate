@@ -1,8 +1,9 @@
 //! Tauri-команды — мост между фронтендом и бэкендом.
 //! Все команды возвращают `Result<_, String>`; строка ошибки приходит на фронт как reject.
 
-use crate::models::{Outbound, Profile, Settings, Subscription};
+use crate::models::{InstalledApp, Outbound, Profile, Settings, Subscription};
 use crate::{import, profiles, settings, subscriptions};
+#[cfg(desktop)]
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
 
@@ -13,8 +14,53 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// Список запускаемых Android-приложений для нативного per-app picker.
+#[tauri::command]
+pub async fn list_installed_apps(
+    app: tauri::AppHandle,
+) -> Result<Vec<InstalledApp>, String> {
+    #[cfg(mobile)]
+    {
+        crate::connection::list_installed_apps(app).await
+    }
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        Ok(Vec::new())
+    }
+}
+
+/// Показывает системный запрос Android 13+ на добавление Quick Settings tile.
+#[tauri::command]
+pub async fn request_android_quick_tile(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(mobile)]
+    {
+        crate::connection::request_quick_tile(app).await
+    }
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
+/// Показывает системный запрос лаунчера на закрепление домашнего виджета.
+#[tauri::command]
+pub async fn request_android_widget(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(mobile)]
+    {
+        crate::connection::request_widget(app).await
+    }
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
 /// Запускает sidecar `sing-box version` и возвращает первую строку вывода.
 #[tauri::command]
+#[cfg(desktop)]
 pub async fn singbox_version(app: tauri::AppHandle) -> Result<String, String> {
     let output = app
         .shell()
@@ -36,6 +82,32 @@ pub async fn singbox_version(app: tauri::AppHandle) -> Result<String, String> {
     Ok(stdout.lines().next().unwrap_or("").trim().to_string())
 }
 
+#[tauri::command]
+#[cfg(mobile)]
+pub async fn singbox_version(_app: tauri::AppHandle) -> Result<String, String> {
+    Ok("sing-box 1.13.14 (Android libbox)".into())
+}
+
+fn android_supported(outbound: &Outbound) -> bool {
+    #[cfg(mobile)]
+    {
+        !matches!(outbound, Outbound::AmneziaWg { .. })
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = outbound;
+        true
+    }
+}
+
+fn ensure_android_supported(outbound: &Outbound) -> Result<(), String> {
+    if android_supported(outbound) {
+        Ok(())
+    } else {
+        Err("AmneziaWG не входит в Android-версию UniGate".into())
+    }
+}
+
 /// Возвращает текущие настройки (или значения по умолчанию, если файла нет).
 #[tauri::command]
 pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
@@ -52,7 +124,10 @@ pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settin
 /// Возвращает все профили.
 #[tauri::command]
 pub fn list_profiles(app: tauri::AppHandle) -> Result<Vec<Profile>, String> {
-    profiles::list(&app)
+    Ok(profiles::list(&app)?
+        .into_iter()
+        .filter(|profile| android_supported(&profile.outbound))
+        .collect())
 }
 
 /// Создаёт профиль с новым id, сохраняет и возвращает его.
@@ -62,6 +137,7 @@ pub fn create_profile(
     name: String,
     outbound: Outbound,
 ) -> Result<Profile, String> {
+    ensure_android_supported(&outbound)?;
     let mut all = profiles::list(&app)?;
     let profile = Profile {
         id: Uuid::new_v4().to_string(),
@@ -77,6 +153,7 @@ pub fn create_profile(
 /// Обновляет существующий профиль (по id). Ошибка, если не найден.
 #[tauri::command]
 pub fn update_profile(app: tauri::AppHandle, profile: Profile) -> Result<Profile, String> {
+    ensure_android_supported(&profile.outbound)?;
     let mut all = profiles::list(&app)?;
     let idx = all
         .iter()
@@ -108,6 +185,7 @@ pub fn import_profile(
     name: Option<String>,
 ) -> Result<Profile, String> {
     let (parsed_name, outbound) = import::parse(&input)?;
+    ensure_android_supported(&outbound)?;
     let final_name = name
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
@@ -139,7 +217,10 @@ pub async fn add_subscription(
     url: String,
 ) -> Result<Subscription, String> {
     let body = subscriptions::fetch(&url).await?;
-    let parsed = subscriptions::parse_list(&body);
+    let parsed: Vec<_> = subscriptions::parse_list(&body)
+        .into_iter()
+        .filter(|(_, outbound)| android_supported(outbound))
+        .collect();
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
     }
@@ -182,7 +263,10 @@ pub async fn update_subscription(
         .position(|s| s.id == id)
         .ok_or_else(|| format!("подписка {id} не найдена"))?;
     let body = subscriptions::fetch(&subs[idx].url).await?;
-    let parsed = subscriptions::parse_list(&body);
+    let parsed: Vec<_> = subscriptions::parse_list(&body)
+        .into_iter()
+        .filter(|(_, outbound)| android_supported(outbound))
+        .collect();
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
     }
@@ -227,11 +311,7 @@ pub fn delete_subscription(app: tauri::AppHandle, id: String) -> Result<(), Stri
 /// (vless://…, для socks/http ссылки нет → JSON-фолбэк), `"json"` — sing-box
 /// outbound JSON. AmneziaWG в формате `link` отдаёт упакованную `vpn://`-ссылку.
 #[tauri::command]
-pub fn export_profile(
-    app: tauri::AppHandle,
-    id: String,
-    format: String,
-) -> Result<String, String> {
+pub fn export_profile(app: tauri::AppHandle, id: String, format: String) -> Result<String, String> {
     let profile = profiles::list(&app)?
         .into_iter()
         .find(|p| p.id == id)

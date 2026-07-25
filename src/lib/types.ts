@@ -166,3 +166,9 @@ export interface Settings {
   /** Windows: запуск с правами администратора без UAC (задача Планировщика). */
   adminLaunch: boolean;
 }
+
+export interface AndroidInstalledApp {
+  packageName: string;
+  name: string;
+  icon: string;
+}

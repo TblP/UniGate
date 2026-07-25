@@ -1,7 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-const appWindow = getCurrentWindow();
-
 /**
  * Кастомная шапка окна (окно запущено без нативной рамки, `decorations: false`).
  * Без иконки и названия — только область перетаскивания и кнопки свернуть/закрыть.
@@ -13,7 +11,7 @@ export function TitleBar() {
         <button
           className="titlebar-btn"
           title="Свернуть"
-          onClick={() => appWindow.minimize()}
+          onClick={() => getCurrentWindow().minimize()}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <rect x="0" y="4.5" width="10" height="1" fill="currentColor" />
@@ -22,7 +20,7 @@ export function TitleBar() {
         <button
           className="titlebar-btn close"
           title="Закрыть"
-          onClick={() => appWindow.close()}
+          onClick={() => getCurrentWindow().close()}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <path

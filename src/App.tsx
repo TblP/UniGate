@@ -5,8 +5,11 @@ import { ConnectionPanel } from "./features/connection/ConnectionPanel";
 import { SubscriptionsPanel } from "./features/subscriptions/SubscriptionsPanel";
 import { RoutingPanel } from "./features/routing/RoutingPanel";
 import { SettingsPanel } from "./features/settings/SettingsPanel";
+import { AndroidApp } from "./mobile/AndroidApp";
+import { isAndroid } from "./lib/platform";
 import type { Theme } from "./lib/types";
 import "./App.css";
+import "./mobile/android.css";
 
 type TabId = "connection" | "subscriptions" | "routing" | "settings";
 
@@ -63,6 +66,10 @@ function App() {
         return "dot";
     }
   }, [connection.state]);
+
+  if (isAndroid) {
+    return <AndroidApp />;
+  }
 
   return (
     <div className="window-root">

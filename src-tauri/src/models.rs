@@ -305,6 +305,15 @@ pub struct Settings {
     pub admin_launch: bool,
 }
 
+/// Запускаемое Android-приложение для per-app split tunneling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledApp {
+    pub package_name: String,
+    pub name: String,
+    pub icon: String,
+}
+
 fn default_true() -> bool {
     true
 }

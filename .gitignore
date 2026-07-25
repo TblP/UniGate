@@ -14,11 +14,13 @@ dist-ssr
 
 # sing-box sidecar binaries — тянутся через scripts/fetch-singbox.*
 /src-tauri/binaries/
+/src-tauri/gen/android/app/src/main/assets/geoip-ru.srs
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude/
 .DS_Store
 *.suo
 *.ntvs*

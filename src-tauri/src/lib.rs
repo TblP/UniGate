@@ -1,5 +1,9 @@
 mod commands;
 mod config;
+#[cfg(desktop)]
+mod connection;
+#[cfg(mobile)]
+#[path = "android/connection.rs"]
 mod connection;
 mod elevation;
 mod export;
@@ -13,9 +17,12 @@ mod subscriptions;
 mod sysproxy;
 
 use connection::Connection;
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
+#[cfg(desktop)]
 use tauri_plugin_autostart::ManagerExt;
 
 /// Аргумент, с которым автозапуск системы стартует приложение.
@@ -30,6 +37,7 @@ pub const AUTOSTART_MARKER: &str = "autostart-redirect.flag";
 /// Запущены ли мы автозапуском системы: по аргументу `--autostart` либо по
 /// свежему маркеру от процесса, средиректившего нас через Планировщик.
 /// Маркер одноразовый — удаляется при любом исходе.
+#[cfg(desktop)]
 fn launched_via_autostart(app: &AppHandle) -> bool {
     let by_arg = std::env::args().any(|a| a == AUTOSTART_ARG);
     let mut by_marker = false;
@@ -48,6 +56,7 @@ fn launched_via_autostart(app: &AppHandle) -> bool {
 
 /// Перерегистрирует включённый автозапуск: записи, сделанные до появления
 /// `--autostart`, не содержат аргумента — enable() идемпотентно докидывает его.
+#[cfg(desktop)]
 fn refresh_autostart(app: &AppHandle) {
     let autolaunch = app.autolaunch();
     if autolaunch.is_enabled().unwrap_or(false) {
@@ -56,6 +65,7 @@ fn refresh_autostart(app: &AppHandle) {
 }
 
 /// Показывает и фокусирует главное окно (из трея).
+#[cfg(desktop)]
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -65,6 +75,7 @@ fn show_main(app: &AppHandle) {
 }
 
 /// Иконка в системном трее с меню (Показать / Скрыть / Выход).
+#[cfg(desktop)]
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Показать", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", "Скрыть в трей", true, None::<&str>)?;
@@ -101,6 +112,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// Закрытие окна: если включено «сворачивать в трей» — прячем, а не выходим.
+#[cfg(desktop)]
 fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         let to_tray = settings::load(window.app_handle())
@@ -115,23 +127,27 @@ fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![AUTOSTART_ARG]),
-        ))
-        .manage(Connection::new())
-        .setup(|app| {
-            // Windows + «запуск от администратора»: обычный запуск редиректим
-            // через задачу планировщика (элевация без UAC) и выходим
-            #[cfg(windows)]
-            if elevation::admin_launch_startup(app.handle()) {
-                app.handle().exit(0);
-                return Ok(());
-            }
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec![AUTOSTART_ARG]),
+    ));
+    #[cfg(mobile)]
+    let builder = builder.plugin(connection::init());
+    let builder = builder.manage(Connection::new()).setup(|app| {
+        // Windows + «запуск от администратора»: обычный запуск редиректим
+        // через задачу планировщика (элевация без UAC) и выходим
+        #[cfg(windows)]
+        if elevation::admin_launch_startup(app.handle()) {
+            app.handle().exit(0);
+            return Ok(());
+        }
+        #[cfg(desktop)]
+        {
             // окно создаётся скрытым (tauri.conf.json): при запуске
             // автозапуском системы остаёмся в трее, иначе показываем
             if !launched_via_autostart(app.handle()) {
@@ -141,9 +157,14 @@ pub fn run() {
             // снять «зависший» системный прокси после нештатного выхода
             connection::reconcile_startup(app.handle());
             build_tray(app.handle())?;
-            Ok(())
-        })
-        .on_window_event(on_window_event)
+        }
+        #[cfg(mobile)]
+        let _ = app;
+        Ok(())
+    });
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(on_window_event);
+    builder
         .invoke_handler(tauri::generate_handler![
             commands::singbox_version,
             commands::get_settings,
@@ -159,6 +180,9 @@ pub fn run() {
             commands::add_subscription,
             commands::update_subscription,
             commands::delete_subscription,
+            commands::list_installed_apps,
+            commands::request_android_quick_tile,
+            commands::request_android_widget,
             connection::connect,
             connection::disconnect,
             connection::get_connection_state,
@@ -172,8 +196,11 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             // при выходе гарантированно убиваем sing-box и снимаем системный прокси
+            #[cfg(desktop)]
             if let tauri::RunEvent::Exit = event {
                 connection::cleanup(app);
             }
+            #[cfg(mobile)]
+            let _ = (app, event);
         });
 }

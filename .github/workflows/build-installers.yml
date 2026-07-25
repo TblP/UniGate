@@ -1,9 +1,9 @@
 name: Build installers
 
-# Собирает инсталлеры UniGate под Windows и macOS.
+# Собирает UniGate под Windows, macOS и Android.
 # - workflow_dispatch — ручной запуск (артефакты качаются со страницы run).
 # - push тега v* — то же самое + отдельным джобом публикует GitHub Release
-#   со всеми инсталлерами (после того как ОБЕ сборки успешно завершились).
+#   со всеми инсталлерами (после успешного завершения всех сборок).
 #
 # Сетевые бинарники (sing-box, geoip-ru, wintun, amneziawg) в git не хранятся
 # (см. .gitignore) — их тянут scripts/fetch-singbox.{ps1,sh} перед сборкой.
@@ -89,17 +89,72 @@ jobs:
           if-no-files-found: error
           path: src-tauri/target/release/bundle/dmg/*.dmg
 
-  # Публикуем Release только на теге v* и только когда ОБЕ сборки удачны
-  # (needs: build). Один джоб собирает артефакты обеих ОС в единый релиз —
+  build-android:
+    name: android-arm64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Android требует техническую подпись APK даже для sideload. Храним
+      # self-signed debug key в Actions cache, чтобы следующие версии могли
+      # устанавливаться поверх предыдущих. Доверенной publisher-подписи нет.
+      - name: Restore Android self-signed key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: unigate-android-debug-keystore-v1
+
+      - name: Setup Android toolchain
+        shell: pwsh
+        run: scripts/setup-android.ps1
+
+      - name: Fetch Android routing assets
+        shell: pwsh
+        run: scripts/fetch-android-assets.ps1
+
+      - name: Build Android ARM64 APK
+        shell: pwsh
+        run: scripts/build-android.ps1
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: unigate-android-arm64
+          if-no-files-found: error
+          path: dist/android/UniGate_*_android_arm64.apk
+
+  # Публикуем Release только на теге v* и только когда все сборки удачны
+  # (needs: build + build-android). Один джоб собирает артефакты в единый релиз —
   # без гонки параллельных загрузок.
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, build-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write # создать/обновить Release и залить в него файлы
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -108,7 +163,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # артефакты обеих ОС: artifacts/unigate-windows/*, unigate-macos-arm64/*
+          # Windows, macOS и Android из отдельных artifact-подкаталогов.
           files: artifacts/**/*
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           fail_on_unmatched_files: true

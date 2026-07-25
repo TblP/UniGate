@@ -6,7 +6,7 @@
 
 Под капотом — один сетевой движок [**sing-box**](https://sing-box.sagernet.org/) (плюс отдельный движок для AmneziaWG): UniGate хранит профили, генерирует конфиг, запускает движок и читает статистику. Лёгкий нативный клиент на **Tauri 2** (Rust) + **React** — бинарник ~15 МБ, минимум ресурсов.
 
-> **Статус:** Windows и macOS готовы — proxy- и TUN-режимы работают (весь трафик, RU-обход, LAN, раздельное туннелирование по приложениям).
+> **Статус:** UniGate доступен для Windows, macOS и Android ARM64. На всех трёх платформах работают TUN, RU/LAN-обход и раздельное туннелирование по приложениям.
 
 ## Возможности
 
@@ -20,13 +20,14 @@
 * 📤 Экспорт профиля: share-ссылка (`vless://` и др.) или JSON (sing-box outbound) — на выбор
 * 📊 Живая статистика скорости и трафика
 * 🖥️ Системный трей, сворачивание в трей, автозапуск, автоподключение
+* 📱 Android: быстрые действия, плитка в шторке и виджеты 1×1 / 2×2
 * 🔒 Никакой телеметрии
 * 🔓 Полностью открытый исходный код (MIT)
 
 ## Поддерживаемые протоколы
 
 * Hysteria 2
-* AmneziaWG *(Windows — движок amneziawg; macOS — amneziawg-go + awg-quick, экспериментально)*
+* AmneziaWG *(Windows — движок amneziawg; macOS — amneziawg-go + awg-quick, экспериментально; Android пока не поддерживается)*
 * SOCKS5
 * HTTP / HTTPS
 * Shadowsocks
@@ -43,12 +44,12 @@
 |------|-----------|
 | GUI-оболочка | Tauri 2 (Rust) |
 | Фронтенд | React + TypeScript + Vite (Zustand) |
-| Сетевое ядро | sing-box (sidecar) |
+| Сетевое ядро | sing-box (sidecar на desktop, libbox на Android) |
 | AmneziaWG | amneziawg (Windows) |
 
 ## Готовые сборки
 
-Инсталлеры под Windows (MSI + NSIS `setup.exe`) и macOS (`.dmg`, Apple Silicon).
+Инсталлеры под Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) и APK для Android ARM64.
 
 > Инсталлеры **не подписаны** (подпись/нотаризация не планируются).
 > 
@@ -60,6 +61,10 @@
 > **Windows:** 
 > - В окне **SmartScreen** выберите «Подробнее → Выполнить в любом случае».
 > - В Windows 11 запуск также может блокировать новая функция **Интеллектуальное управление приложениями** (Smart App Control). Она срабатывает на любые программы без цифровой подписи. Поскольку у UniGate нет подписи, эту функцию придется отключить вручную в настройках «Безопасности Windows» (раздел *Управление приложениями и браузером* → *Интеллектуальное управление приложениями*).
+>
+> **Android:**
+> - Разрешите браузеру или файловому менеджеру **установку неизвестных приложений**.
+> - Play Protect и HyperOS могут предупредить, что APK получен не из магазина. У сборки нет доверенной publisher-подписи.
 
 ## Сборка и запуск (локально)
 
@@ -72,6 +77,11 @@ npm install                      # зависимости фронта
 pwsh scripts/fetch-singbox.ps1   # Windows: sing-box + wintun + amneziawg + geoip
 bash scripts/fetch-singbox.sh    # macOS/Linux: sing-box + geoip
 bash scripts/fetch-awg-macos.sh  # macOS: движок AmneziaWG (собирает зафиксированные версии, нужен Go)
+
+# Android ARM64 (Windows-hosted portable toolchain):
+pwsh scripts/setup-android.ps1
+pwsh scripts/fetch-android-assets.ps1
+pwsh scripts/build-android.ps1   # dist/android/UniGate_<version>_android_arm64.apk
 
 npm run tauri dev                # запуск в dev-режиме
 npm run tauri build              # сборка (Windows → MSI + NSIS)
