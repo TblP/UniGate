@@ -60,7 +60,14 @@ try {
 
   $jniLibrary = Join-Path $projectRoot "src-tauri\gen\android\app\src\main\jniLibs\arm64-v8a\libunigate_lib.so"
   New-Item -ItemType Directory -Force -Path (Split-Path $jniLibrary) | Out-Null
-  Copy-Item -LiteralPath $rustLibrary -Destination $jniLibrary -Force
+  $jniIsCurrent = (Test-Path -LiteralPath $jniLibrary) -and
+    ((Get-FileHash -Algorithm SHA256 -LiteralPath $rustLibrary).Hash -eq
+      (Get-FileHash -Algorithm SHA256 -LiteralPath $jniLibrary).Hash)
+  if ($jniIsCurrent) {
+    Write-Host "JNI library already points to the Rust build; skipping copy."
+  } else {
+    Copy-Item -LiteralPath $rustLibrary -Destination $jniLibrary -Force
+  }
 
   $strip = Join-Path $ndkDir "toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-strip.exe"
   & $strip --strip-unneeded $jniLibrary
