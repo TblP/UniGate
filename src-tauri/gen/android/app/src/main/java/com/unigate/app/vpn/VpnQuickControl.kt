@@ -10,6 +10,13 @@ import androidx.core.content.ContextCompat
 import com.unigate.app.MainActivity
 
 object VpnQuickControl {
+    data class SavedConnection(
+        val config: String,
+        val profileName: String,
+        val includePackages: List<String>,
+        val excludePackages: List<String>,
+    )
+
     enum class State {
         OFF,
         CONNECTING,
@@ -26,6 +33,7 @@ object VpnQuickControl {
     private const val KEY_INCLUDE_PACKAGES = "include_packages"
     private const val KEY_EXCLUDE_PACKAGES = "exclude_packages"
     private const val KEY_STATE = "state"
+    private const val KEY_SHOULD_RECONNECT = "should_reconnect"
 
     fun saveConnection(
         context: Context,
@@ -47,6 +55,28 @@ object VpnQuickControl {
         !context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_CONFIG, null)
             .isNullOrBlank()
+
+    fun savedConnection(context: Context): SavedConnection? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val config = prefs.getString(KEY_CONFIG, null)?.takeIf { it.isNotBlank() } ?: return null
+        return SavedConnection(
+            config = config,
+            profileName = prefs.getString(KEY_PROFILE_NAME, "UniGate").orEmpty().ifBlank { "UniGate" },
+            includePackages = prefs.getStringSet(KEY_INCLUDE_PACKAGES, emptySet()).orEmpty().toList(),
+            excludePackages = prefs.getStringSet(KEY_EXCLUDE_PACKAGES, emptySet()).orEmpty().toList(),
+        )
+    }
+
+    fun shouldReconnect(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SHOULD_RECONNECT, false)
+
+    fun setShouldReconnect(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SHOULD_RECONNECT, enabled)
+            .commit()
+    }
 
     fun state(context: Context): State {
         val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -70,38 +100,37 @@ object VpnQuickControl {
     }
 
     fun connect(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val config = prefs.getString(KEY_CONFIG, null)
-        if (config.isNullOrBlank() || VpnService.prepare(context) != null) return false
+        val connection = savedConnection(context)
+        if (connection == null || VpnService.prepare(context) != null) return false
 
         val intent = Intent(context, UniGateVpnService::class.java).apply {
             action = UniGateVpnService.ACTION_START
-            putExtra(UniGateVpnService.EXTRA_CONFIG, config)
-            putExtra(
-                UniGateVpnService.EXTRA_PROFILE_NAME,
-                prefs.getString(KEY_PROFILE_NAME, "UniGate"),
-            )
+            putExtra(UniGateVpnService.EXTRA_CONFIG, connection.config)
+            putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, connection.profileName)
             putExtra(UniGateVpnService.EXTRA_START_TOKEN, UniGateVpnService.beginStart())
             putStringArrayListExtra(
                 UniGateVpnService.EXTRA_INCLUDE_PACKAGES,
-                ArrayList(prefs.getStringSet(KEY_INCLUDE_PACKAGES, emptySet()).orEmpty()),
+                ArrayList(connection.includePackages),
             )
             putStringArrayListExtra(
                 UniGateVpnService.EXTRA_EXCLUDE_PACKAGES,
-                ArrayList(prefs.getStringSet(KEY_EXCLUDE_PACKAGES, emptySet()).orEmpty()),
+                ArrayList(connection.excludePackages),
             )
         }
         return runCatching {
+            setShouldReconnect(context, true)
             setState(context, State.CONNECTING)
             ContextCompat.startForegroundService(context, intent)
             true
         }.getOrElse {
+            setShouldReconnect(context, false)
             setState(context, State.OFF)
             false
         }
     }
 
     fun disconnect(context: Context) {
+        setShouldReconnect(context, false)
         context.startService(
             Intent(context, UniGateVpnService::class.java).apply {
                 action = UniGateVpnService.ACTION_STOP

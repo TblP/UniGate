@@ -80,7 +80,10 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun status(invoke: Invoke) {
-        val state = VpnQuickControl.state(activity)
+        val state = UniGateVpnService.runtimeState()
+        if (VpnQuickControl.state(activity) != state) {
+            VpnQuickControl.setState(activity, state)
+        }
         invoke.resolve(
             JSObject().apply {
                 put("state", state.name.lowercase())
@@ -155,6 +158,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 args.includePackages,
                 args.excludePackages,
             )
+            VpnQuickControl.setShouldReconnect(activity, true)
             val startToken = UniGateVpnService.beginStart()
             val intent = Intent(activity, UniGateVpnService::class.java).apply {
                 action = UniGateVpnService.ACTION_START
@@ -180,6 +184,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 }
             }.start()
         } catch (error: Exception) {
+            VpnQuickControl.setShouldReconnect(activity, false)
             invoke.reject(error.message ?: "Не удалось запустить Android VPN", error)
         }
     }

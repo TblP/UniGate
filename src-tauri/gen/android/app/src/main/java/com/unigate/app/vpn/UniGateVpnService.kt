@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager.NameNotFoundException
 import android.net.ConnectivityManager
 import android.net.IpPrefix
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
@@ -60,6 +61,10 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         private var startSequence = 0L
         private var completedStart = 0L
         private var startFailure: String? = null
+        @Volatile
+        private var liveState = VpnQuickControl.State.OFF
+
+        fun runtimeState(): VpnQuickControl.State = liveState
 
         fun beginStart(): Long = synchronized(startMonitor) {
             startSequence += 1
@@ -106,35 +111,53 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            VpnQuickControl.setShouldReconnect(this, false)
             stopVpn()
             return START_NOT_STICKY
         }
 
-        profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME).orEmpty().ifBlank { "UniGate" }
-        VpnQuickControl.setState(this, VpnQuickControl.State.CONNECTING)
-        showForeground("Подключение…")
-        val config = intent?.getStringExtra(EXTRA_CONFIG)
-        val startToken = intent?.getLongExtra(EXTRA_START_TOKEN, 0L) ?: 0L
+        val explicitConfig = intent?.getStringExtra(EXTRA_CONFIG)
+        val alwaysOnRequested = intent?.action == SERVICE_INTERFACE ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isAlwaysOn)
+        val restoreRequested = VpnStartPolicy.shouldRestore(
+            explicitConfig = explicitConfig,
+            reconnectRequested = VpnQuickControl.shouldReconnect(this),
+            alwaysOn = alwaysOnRequested,
+        )
+        val saved = if (restoreRequested) VpnQuickControl.savedConnection(this) else null
+        val config = explicitConfig?.takeIf { it.isNotBlank() } ?: saved?.config
         if (config.isNullOrBlank()) {
-            finishStart(startToken, "Пустой VPN-конфиг")
-            showForeground("Ошибка: пустой конфиг")
-            stopSelf()
+            liveState = VpnQuickControl.State.OFF
+            VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
+            stopSelf(startId)
             return START_NOT_STICKY
         }
+
+        profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME)
+            .orEmpty()
+            .ifBlank { saved?.profileName ?: "UniGate" }
+        liveState = VpnQuickControl.State.CONNECTING
+        VpnQuickControl.setState(this, VpnQuickControl.State.CONNECTING)
+        showForeground("Подключение…")
+        val startToken = intent?.getLongExtra(EXTRA_START_TOKEN, 0L) ?: 0L
         val includePackages =
-            intent.getStringArrayListExtra(EXTRA_INCLUDE_PACKAGES).orEmpty()
+            intent?.getStringArrayListExtra(EXTRA_INCLUDE_PACKAGES) ?: saved?.includePackages.orEmpty()
         val excludePackages =
-            intent.getStringArrayListExtra(EXTRA_EXCLUDE_PACKAGES).orEmpty()
+            intent?.getStringArrayListExtra(EXTRA_EXCLUDE_PACKAGES) ?: saved?.excludePackages.orEmpty()
+        VpnQuickControl.setShouldReconnect(this, true)
 
         Thread {
             runCatching {
                 startVpn(config, includePackages, excludePackages)
             }.onSuccess {
                 finishStart(startToken, null)
+                liveState = VpnQuickControl.State.ON
                 VpnQuickControl.setState(this, VpnQuickControl.State.ON)
                 showForeground("VPN подключён")
             }.onFailure {
                 finishStart(startToken, it.message ?: "Неизвестная ошибка VPN")
+                liveState = VpnQuickControl.State.OFF
+                VpnQuickControl.setShouldReconnect(this, false)
                 VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
                 showForeground("Ошибка VPN: ${it.message ?: "неизвестная ошибка"}")
                 stopVpn()
@@ -211,6 +234,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     @Synchronized
     private fun stopVpn() {
         closeCore()
+        liveState = VpnQuickControl.State.OFF
         VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -226,15 +250,18 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         defaultNetworkCallback = null
         defaultInterfaceListener = null
         defaultNetwork = null
+        runCatching { setUnderlyingNetworks(null) }
     }
 
     override fun onDestroy() {
         closeCore()
+        liveState = VpnQuickControl.State.OFF
         VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
         super.onDestroy()
     }
 
     override fun onRevoke() {
+        VpnQuickControl.setShouldReconnect(this, false)
         stopVpn()
         super.onRevoke()
     }
@@ -406,7 +433,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 defaultNetwork = network
-                updateDefaultInterface(network)
+                runCatching { setUnderlyingNetworks(arrayOf(network)) }
             }
 
             override fun onCapabilitiesChanged(
@@ -414,21 +441,21 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
                 networkCapabilities: NetworkCapabilities,
             ) {
                 if (defaultNetwork == network &&
-                    networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    !networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                 ) {
-                    updateDefaultInterface(network)
+                    clearDefaultInterface(listener)
+                }
+            }
+
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                if (defaultNetwork == network) {
+                    updateDefaultInterface(network, linkProperties)
                 }
             }
 
             override fun onLost(network: Network) {
                 if (defaultNetwork != network) return
-                defaultNetwork = findUnderlyingNetwork()
-                val replacement = defaultNetwork
-                if (replacement == null) {
-                    listener.updateDefaultInterface("", -1, false, false)
-                } else {
-                    updateDefaultInterface(replacement)
-                }
+                clearDefaultInterface(listener)
             }
         }
         defaultNetworkCallback = callback
@@ -448,7 +475,10 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         }
         findUnderlyingNetwork()?.let {
             defaultNetwork = it
-            updateDefaultInterface(it)
+            runCatching { setUnderlyingNetworks(arrayOf(it)) }
+            connectivity.getLinkProperties(it)?.let { properties ->
+                updateDefaultInterface(it, properties)
+            }
         }
     }
 
@@ -460,18 +490,20 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
                 capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
         }
 
-    private fun updateDefaultInterface(network: Network) {
-        repeat(10) {
-            val name = connectivity.getLinkProperties(network)?.interfaceName
-            if (!name.isNullOrBlank()) {
-                val index = runCatching { NetworkInterface.getByName(name).index }.getOrDefault(-1)
-                if (index >= 0) {
-                    defaultInterfaceListener?.updateDefaultInterface(name, index, false, false)
-                    return
-                }
-            }
-            Thread.sleep(50)
+    private fun updateDefaultInterface(network: Network, linkProperties: LinkProperties) {
+        val name = linkProperties.interfaceName ?: return
+        val index = runCatching { NetworkInterface.getByName(name)?.index ?: -1 }.getOrDefault(-1)
+        if (index >= 0) {
+            defaultNetwork = network
+            runCatching { setUnderlyingNetworks(arrayOf(network)) }
+            defaultInterfaceListener?.updateDefaultInterface(name, index, false, false)
         }
+    }
+
+    private fun clearDefaultInterface(listener: InterfaceUpdateListener) {
+        defaultNetwork = null
+        runCatching { setUnderlyingNetworks(emptyArray()) }
+        listener.updateDefaultInterface("", -1, false, false)
     }
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
