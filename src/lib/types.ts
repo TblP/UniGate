@@ -140,7 +140,7 @@ export type AppMode = "off" | "only" | "except";
 export interface Routing {
   /** LAN (приватные IP) — напрямую. */
   bypassLan: boolean;
-  /** Windows: совместимость DNS с одновременно активным OpenVPN/другим VPN. */
+  /** Windows: сохранить конкретные маршруты и DNS одновременно активного OpenVPN/другого VPN. */
   vpnCompatibility: boolean;
   /** RU-трафик (geoip-ru + .ru/.рф/.su) — напрямую. */
   bypassRu: boolean;

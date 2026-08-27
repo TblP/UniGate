@@ -19,6 +19,12 @@ pub const SHIM_PORT: u16 = 2081;
 const SHIM_CONF: &str = "awg-shim.conf";
 const RUNNING_CONFIG: &str = "running-config.json";
 const EVENT: &str = "connection-state";
+const GEOIP_RU_FILE: &str = "geoip-ru.srs";
+const GEOIP_RU_URL: &str =
+    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs";
+const GEOIP_REFRESH_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+static GEOIP_UPDATE_ATTEMPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 /// Имя AmneziaWG-тоннеля (= имя .conf без расширения) для /installtunnelservice.
 /// Только Windows: на macOS движок (awg-quick) адресуется путём к `.conf`.
 #[cfg(target_os = "windows")]
@@ -298,41 +304,193 @@ fn kill_shim(app: &AppHandle) {
     }
 }
 
-/// Готовит `geoip-ru.srs` в каталоге данных приложения (App Support) и возвращает
-/// путь к копии. На macOS папки `~/Desktop`/`~/Documents`/`~/Downloads` закрыты TCC:
-/// процесс sing-box (даже от root) не может читать оттуда data-файлы (EPERM →
-/// «operation not permitted», ядро падает на старте). App Support под TCC не попадает,
-/// поэтому в dev-раскладке (проект на Рабочем столе) копируем geoip туда.
-#[cfg(target_os = "macos")]
-fn staged_geoip(app: &AppHandle) -> Option<String> {
-    let src = match binaries_file("geoip-ru.srs") {
-        Some(p) => p,
-        None => {
-            // источник не найден (нестандартная раскладка) — используем ранее
-            // staged-копию, если есть, вместо тихого отключения RU-обхода
-            let staged = storage::path(app, "geoip-ru.srs").ok().filter(|p| p.exists());
-            if staged.is_none() {
-                eprintln!("geoip-ru.srs не найден — RU-обход не будет применён");
-            }
-            return staged.map(|p| p.to_string_lossy().into_owned());
+fn valid_geoip(bytes: &[u8]) -> bool {
+    // sing-box rule-set binary: magic `SRS` + version. Ограничения
+    // отсекают HTML-ошибку GitHub и случайно обрезанную загрузку.
+    (10_000..=1_000_000).contains(&bytes.len()) && bytes.starts_with(b"SRS\x01")
+}
+
+fn valid_geoip_file(path: &std::path::Path) -> bool {
+    std::fs::read(path)
+        .map(|bytes| valid_geoip(&bytes))
+        .unwrap_or(false)
+}
+
+fn geoip_is_fresh(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .map(|age| age < GEOIP_REFRESH_AFTER)
+        .unwrap_or(false)
+}
+
+/// Заменяет кэш через готовый temp-файл. На Windows `rename` не
+/// перезаписывает цель, поэтому держим backup до успешной замены.
+fn replace_geoip(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("srs.tmp");
+    std::fs::write(&tmp, bytes)
+        .map_err(|e| format!("не удалось записать {}: {e}", tmp.display()))?;
+    if !valid_geoip_file(&tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err("загруженный geoip-ru.srs не прошёл проверку".into());
+    }
+
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        let backup = path.with_extension("srs.bak");
+        let _ = std::fs::remove_file(&backup);
+        std::fs::rename(path, &backup)
+            .map_err(|e| format!("не удалось подготовить замену geoip: {e}"))?;
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::rename(&backup, path);
+            return Err(format!("не удалось заменить geoip: {e}"));
         }
-    };
-    let dst = match storage::path(app, "geoip-ru.srs") {
-        Ok(p) => p,
-        Err(_) => return Some(src.to_string_lossy().into_owned()),
-    };
-    // копируем, если целевого нет или он другого размера (обновился)
-    let need_copy = match (std::fs::metadata(&dst), std::fs::metadata(&src)) {
-        (Ok(d), Ok(s)) => d.len() != s.len(),
-        _ => true,
-    };
-    if need_copy {
-        if let Err(e) = std::fs::copy(&src, &dst) {
-            eprintln!("не удалось скопировать geoip в data dir: {e}");
-            return Some(src.to_string_lossy().into_owned());
+        let _ = std::fs::remove_file(backup);
+        return Ok(());
+    }
+
+    std::fs::rename(&tmp, path)
+        .map_err(|e| format!("не удалось установить geoip: {e}"))
+}
+
+/// Возвращает читаемую ядром копию GeoIP из app config dir.
+/// Раз в сутки пытаемся обновить её до актуальной SagerNet; при любой
+/// ошибке остаётся прежний кэш или встроенная в приложение база.
+/// Заодно это снимает macOS TCC-проблему с проектом на Desktop.
+async fn prepare_geoip(app: &AppHandle) -> Option<String> {
+    let cache = storage::path(app, GEOIP_RU_FILE).ok();
+    let cached_valid = cache.as_deref().map(valid_geoip_file).unwrap_or(false);
+
+    let stale = !cached_valid || !cache.as_deref().map(geoip_is_fresh).unwrap_or(false);
+    // Если GitHub недоступен, не задерживаем каждый reconnect
+    // в том же запуске приложения; новая попытка будет после перезапуска.
+    let should_refresh = stale
+        && !GEOIP_UPDATE_ATTEMPTED.swap(true, std::sync::atomic::Ordering::Relaxed);
+    if should_refresh {
+        let download = async {
+            let client = reqwest::Client::builder()
+                .user_agent("UniGate")
+                .timeout(std::time::Duration::from_secs(6))
+                .build()
+                .map_err(|e| format!("http-клиент geoip: {e}"))?;
+            let response = client
+                .get(GEOIP_RU_URL)
+                .send()
+                .await
+                .map_err(|e| format!("загрузка geoip: {e}"))?;
+            if !response.status().is_success() {
+                return Err(format!("geoip вернул статус {}", response.status()));
+            }
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|e| format!("чтение geoip: {e}"))?;
+            if !valid_geoip(&bytes) {
+                return Err("ответ geoip не похож на sing-box rule-set".to_string());
+            }
+            Ok::<_, String>(bytes)
+        }
+        .await;
+
+        match (download, cache.as_deref()) {
+            (Ok(bytes), Some(path)) => {
+                if let Err(e) = replace_geoip(path, &bytes) {
+                    eprintln!("[geoip] {e}");
+                }
+            }
+            (Err(e), _) => eprintln!("[geoip] {e}; используем локальную базу"),
+            _ => {}
         }
     }
-    Some(dst.to_string_lossy().into_owned())
+
+    if let Some(path) = cache.filter(|path| valid_geoip_file(path)) {
+        return Some(path.to_string_lossy().into_owned());
+    }
+    let bundled = binaries_file(GEOIP_RU_FILE).filter(|path| valid_geoip_file(path));
+    if bundled.is_none() {
+        eprintln!("geoip-ru.srs не найден — RU-обход не будет применён");
+    }
+    bundled.map(|path| path.to_string_lossy().into_owned())
+}
+
+fn parse_vpn_route_prefixes(output: &str) -> Vec<String> {
+    let mut routes = Vec::new();
+    for prefix in output.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Some((ip, bits)) = prefix.split_once('/') else {
+            continue;
+        };
+        let Ok(ip) = ip.parse::<std::net::Ipv4Addr>() else {
+            continue;
+        };
+        let Ok(bits) = bits.parse::<u8>() else {
+            continue;
+        };
+        // Не отдаём второму VPN default/half-default: обычный
+        // интернет должен остаться за UniGate. Не исключаем также
+        // loopback/multicast и служебную benchmark-сеть нашего TUN.
+        let octets = ip.octets();
+        if !(8..=32).contains(&bits)
+            || ip.is_loopback()
+            || ip.is_multicast()
+            || (octets[0] == 198 && matches!(octets[1], 18 | 19))
+        {
+            continue;
+        }
+        let value = format!("{ip}/{bits}");
+        if !routes.contains(&value) {
+            routes.push(value);
+        }
+    }
+    routes
+}
+
+/// Конкретные IPv4-сети активных сторонних VPN-адаптеров.
+/// Имя самого подключения может быть любым; ищем также типичные
+/// описания драйверов OpenVPN/WireGuard/корпоративных VPN.
+#[cfg(target_os = "windows")]
+fn detect_other_vpn_routes() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let script = r#"
+$pattern = '(?i)(openvpn|wireguard|wintun|tap-windows|\bdco\b|tailscale|zerotier|amnezia|anyconnect|fortinet|forticlient|globalprotect|pulse secure|juniper|sonicwall|check point|zscaler|netmotion|vpn|wan miniport.*(ikev2|l2tp|pptp|sstp))'
+$indexes = @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue |
+  Where-Object { $_.Status -eq 'Up' -and $_.Name -ne 'tun0' -and ($_.Name -match $pattern -or $_.InterfaceDescription -match $pattern) } |
+  Select-Object -ExpandProperty ifIndex)
+if ($indexes.Count -gt 0) {
+  Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.State -eq 'Alive' -and $indexes -contains $_.InterfaceIndex } |
+    Select-Object -ExpandProperty DestinationPrefix -Unique
+}
+"#;
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            parse_vpn_route_prefixes(&String::from_utf8_lossy(&output.stdout))
+        }
+        Ok(output) => {
+            eprintln!(
+                "[vpn-compat] не удалось прочитать маршруты: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            Vec::new()
+        }
+        Err(e) => {
+            eprintln!("[vpn-compat] не удалось запустить аудит маршрутов: {e}");
+            Vec::new()
+        }
+    }
 }
 
 /// Путь к бинарнику sing-box для ПРЯМОГО запуска (не через Tauri-sidecar).
@@ -684,20 +842,28 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
 
     set_state(&app, ConnectionState::Connecting);
 
-    // путь к geoip-ru.srs для RU-обхода (только TUN + bypass_ru).
-    // На macOS отдаём копию из App Support (обход TCC на ~/Desktop), см. staged_geoip.
+    // Актуальная кэшированная geoip-ru.srs для RU-обхода.
+    // При офлайне остаётся прежний кэш/встроенная база.
     let geoip = if mode == Mode::Tun && settings.routing.bypass_ru {
-        #[cfg(target_os = "macos")]
-        {
-            staged_geoip(&app)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            binaries_file("geoip-ru.srs").map(|p| p.to_string_lossy().into_owned())
-        }
+        prepare_geoip(&app).await
     } else {
         None
     };
+
+    // До создания tun0 снимаем снимок конкретных сетей уже
+    // активного стороннего VPN. Его default route фильтруется —
+    // обычный интернет по-прежнему перекрывает UniGate.
+    #[cfg(target_os = "windows")]
+    let vpn_route_excludes = if mode == Mode::Tun
+        && settings.routing.bypass_lan
+        && settings.routing.vpn_compatibility
+    {
+        detect_other_vpn_routes()
+    } else {
+        Vec::new()
+    };
+    #[cfg(not(target_os = "windows"))]
+    let vpn_route_excludes: Vec<String> = Vec::new();
     // macOS/прочие + TUN: предрезолв домена сервера системным резолвером ДО
     // запуска ядра — подъём туннеля не зависит от доступности публичного
     // бутстрап-DNS (см. комментарий в config.rs). Best-effort с таймаутом:
@@ -733,7 +899,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     }
 
     // генерируем и пишем рабочий конфиг
-    let mut cfg = config::generate(
+    let mut cfg = config::generate_with_vpn_routes(
         &gen_profile,
         mode,
         LOCAL_PORT,
@@ -742,6 +908,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         &bootstrap_ips,
         tun_ipv6,
         settings.tun_stack,
+        &vpn_route_excludes,
     );
 
     // Трафик самого шима (UDP к AWG-серверу) обязан идти мимо TUN, иначе цикл:
@@ -1265,7 +1432,28 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_awg_config_for_macos;
+    use super::{normalize_awg_config_for_macos, parse_vpn_route_prefixes, valid_geoip};
+
+    #[test]
+    fn geoip_validation_rejects_html_and_truncated_data() {
+        let mut valid = b"SRS\x01".to_vec();
+        valid.resize(10_000, 0);
+        assert!(valid_geoip(&valid));
+        assert!(!valid_geoip(b"<html>rate limited</html>"));
+        assert!(!valid_geoip(b"SRS\x01short"));
+    }
+
+    #[test]
+    fn vpn_routes_keep_specific_networks_and_drop_default_hijacks() {
+        let routes = parse_vpn_route_prefixes(
+            "0.0.0.0/0\n0.0.0.0/1\n128.0.0.0/1\n10.44.0.0/16\n\
+             100.96.0.0/11\n203.0.113.0/24\n198.18.0.0/15\n10.44.0.0/16\nbad\n",
+        );
+        assert_eq!(
+            routes,
+            vec!["10.44.0.0/16", "100.96.0.0/11", "203.0.113.0/24"]
+        );
+    }
 
     #[test]
     fn macos_awg_drops_only_empty_concealment_packets() {

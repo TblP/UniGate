@@ -90,13 +90,18 @@ if (Test-Path $awgDest) {
 
 # --- geoip-ru.srs (RU-обход в split-tunneling, Phase 7b) ---
 $geoipDest = Join-Path $binDir "geoip-ru.srs"
-if (Test-Path $geoipDest) {
-  Write-Host "geoip-ru.srs уже на месте"
-} else {
-  Write-Host "Скачиваю geoip-ru.srs (SagerNet rule-set)"
-  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs" -OutFile $geoipDest -Headers @{ "User-Agent" = "UniGate" }
-  Write-Host "Готово: $geoipDest"
+$geoipTmp = "$geoipDest.tmp"
+Write-Host "Обновляю geoip-ru.srs (SagerNet rule-set)"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs" -OutFile $geoipTmp -Headers @{ "User-Agent" = "UniGate" }
+$geoipBytes = [System.IO.File]::ReadAllBytes($geoipTmp)
+if ($geoipBytes.Length -lt 10000 -or
+    $geoipBytes[0] -ne 0x53 -or $geoipBytes[1] -ne 0x52 -or
+    $geoipBytes[2] -ne 0x53 -or $geoipBytes[3] -ne 0x01) {
+  Remove-Item -LiteralPath $geoipTmp -Force -ErrorAction SilentlyContinue
+  throw "Загруженный geoip-ru.srs не прошёл проверку"
 }
+Move-Item -LiteralPath $geoipTmp -Destination $geoipDest -Force
+Write-Host "Готово: $geoipDest"
 
 # --- awg-shim (userspace AmneziaWG -> SOCKS5; собирается из awg-shim/ на Go) ---
 & (Join-Path $PSScriptRoot "build-awg-shim.ps1")

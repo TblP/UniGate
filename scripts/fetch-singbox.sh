@@ -53,10 +53,13 @@ fi
 
 # geoip-ru.srs (RU-обход в split-tunneling)
 geoip="$BIN_DIR/geoip-ru.srs"
-if [ -f "$geoip" ]; then
-  echo "geoip-ru.srs уже на месте"
-else
-  echo "Скачиваю geoip-ru.srs"
-  curl -sL "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs" -o "$geoip"
-  echo "Готово: $geoip"
+geoip_tmp="$geoip.tmp"
+echo "Обновляю geoip-ru.srs"
+curl -fsSL "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs" -o "$geoip_tmp"
+if [ "$(wc -c < "$geoip_tmp")" -lt 10000 ] || [ "$(head -c 4 "$geoip_tmp" | od -An -tx1 | tr -d ' \n')" != "53525301" ]; then
+  rm -f "$geoip_tmp"
+  echo "Загруженный geoip-ru.srs не прошёл проверку" >&2
+  exit 1
 fi
+mv -f "$geoip_tmp" "$geoip"
+echo "Готово: $geoip"

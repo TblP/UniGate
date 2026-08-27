@@ -17,6 +17,7 @@ pub const CLASH_API_PORT: u16 = 9090;
 /// см. комментарий про DNS-бутстрап в `generate_tun`); пустой список = нет.
 /// `tun_ipv6` — перехватывать ли IPv6 (только если у системы РЕАЛЬНО есть
 /// IPv6-маршрут, см. комментарий у tun-адреса в `generate_tun`).
+#[cfg_attr(not(any(target_os = "android", test)), allow(dead_code))]
 pub fn generate(
     profile: &Profile,
     mode: Mode,
@@ -27,14 +28,50 @@ pub fn generate(
     tun_ipv6: bool,
     stack: TunStack,
 ) -> Value {
+    generate_with_vpn_routes(
+        profile,
+        mode,
+        local_port,
+        routing,
+        geoip_ru,
+        bootstrap_ips,
+        tun_ipv6,
+        stack,
+        &[],
+    )
+}
+
+/// Вариант [`generate`] с маршрутами уже активного стороннего VPN.
+/// Они исключаются из TUN UniGate только при явно включённой
+/// `vpn_compatibility`; default route сюда не передаётся.
+pub fn generate_with_vpn_routes(
+    profile: &Profile,
+    mode: Mode,
+    local_port: u16,
+    routing: &Routing,
+    geoip_ru: Option<&str>,
+    bootstrap_ips: &[std::net::IpAddr],
+    tun_ipv6: bool,
+    stack: TunStack,
+    vpn_route_excludes: &[String],
+) -> Value {
     match mode {
         Mode::Proxy => generate_proxy(profile, local_port),
-        Mode::Tun => generate_tun(profile, routing, geoip_ru, bootstrap_ips, tun_ipv6, stack),
+        Mode::Tun => generate_tun(
+            profile,
+            routing,
+            geoip_ru,
+            bootstrap_ips,
+            tun_ipv6,
+            stack,
+            vpn_route_excludes,
+        ),
     }
 }
 
 /// Домен сервера outbound, если это именно домен (IP-литерал → None).
 /// Для AmneziaWG не применимо (свой движок, не sing-box).
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn server_domain(outbound: &Outbound) -> Option<&str> {
     let server = match outbound {
         Outbound::Socks { server, .. }
@@ -83,6 +120,7 @@ fn generate_tun(
     bootstrap_ips: &[std::net::IpAddr],
     tun_ipv6: bool,
     stack: TunStack,
+    vpn_route_excludes: &[String],
 ) -> Value {
     #[cfg(target_os = "windows")]
     let _ = (bootstrap_ips, tun_ipv6); // Windows: проверенный конфиг, эти механизмы не используем
@@ -261,24 +299,24 @@ fn generate_tun(
         // VPN (OpenVPN/TAP/Wintun) остаются нативными и не переоткрываются
         // sing-box через физический интерфейс. В частности, это сохраняет
         // рабочие сети 10.240.0.0/24 и 172.16.0.0/12 из OpenVPN.
-        #[cfg(target_os = "android")]
-        {
-            tun_inbound["route_exclude_address"] = json!([
-                "10.0.0.0/8",
-                "100.64.0.0/10",
-                "169.254.0.0/16",
-                "172.16.0.0/12",
-                "192.168.0.0/16"
-            ]);
+        let mut excludes = vec![
+            "10.0.0.0/8".to_string(),
+            "100.64.0.0/10".to_string(),
+            "169.254.0.0/16".to_string(),
+            "172.16.0.0/12".to_string(),
+            "192.168.0.0/16".to_string(),
+        ];
+        // На Windows режим совместимости добавляет реальные маршруты
+        // активного OpenVPN/WireGuard-клиента. Так работают не только
+        // RFC1918, но и 100.64/10/публичные корпоративные подсети.
+        if cfg!(target_os = "windows") && routing.vpn_compatibility {
+            for prefix in vpn_route_excludes {
+                if !excludes.contains(prefix) {
+                    excludes.push(prefix.clone());
+                }
+            }
         }
-        #[cfg(not(target_os = "android"))]
-        {
-            tun_inbound["route_exclude_address"] = json!([
-                "10.0.0.0/8",
-                "172.16.0.0/12",
-                "192.168.0.0/16"
-            ]);
-        }
+        tun_inbound["route_exclude_address"] = json!(excludes);
     }
 
     json!({
@@ -645,10 +683,11 @@ mod tests {
         assert_eq!(cfg["inbounds"][0]["address"][0], "198.18.0.1/30");
         #[cfg(target_os = "windows")]
         assert_eq!(cfg["inbounds"][0]["strict_route"], false);
-        assert_eq!(
-            cfg["inbounds"][0]["route_exclude_address"][1],
-            "172.16.0.0/12"
-        );
+        assert!(cfg["inbounds"][0]["route_exclude_address"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "172.16.0.0/12"));
         assert!(cfg["route"]["rule_set"].is_array());
         // RU-домены имеют приоритет и резолвятся напрямую; DNS выбранного
         // приложения идёт через VPN, DNS остальных — локально.
@@ -729,6 +768,38 @@ mod tests {
         );
         assert_eq!(cfg["inbounds"][0]["strict_route"], true);
         assert!(cfg["inbounds"][0]["route_exclude_address"].is_array());
+    }
+
+    #[test]
+    fn vpn_compatibility_adds_detected_routes_without_replacing_unigate_default() {
+        let routing = Routing {
+            bypass_lan: true,
+            vpn_compatibility: true,
+            ..Routing::default()
+        };
+        let detected = vec!["100.96.0.0/11".to_string(), "203.0.113.0/24".to_string()];
+        let cfg = generate_with_vpn_routes(
+            &socks_profile(),
+            Mode::Tun,
+            2080,
+            &routing,
+            None,
+            &[],
+            false,
+            TunStack::Gvisor,
+            &detected,
+        );
+        let excludes = cfg["inbounds"][0]["route_exclude_address"]
+            .as_array()
+            .unwrap();
+        assert!(excludes.iter().any(|value| value == "100.64.0.0/10"));
+        #[cfg(target_os = "windows")]
+        {
+            assert!(excludes.iter().any(|value| value == "100.96.0.0/11"));
+            assert!(excludes.iter().any(|value| value == "203.0.113.0/24"));
+        }
+        assert!(!excludes.iter().any(|value| value == "0.0.0.0/0"));
+        assert_eq!(cfg["route"]["final"], "proxy");
     }
 
     #[test]
