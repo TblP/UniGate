@@ -157,8 +157,16 @@ diff --git a/src/wg-quick/darwin.bash b/src/wg-quick/darwin.bash
  	[[ ${#DNS[@]} -gt 0 ]] && trap set_dns ALRM
  	# TODO: this should also check to see if the endpoint actually changes
  	# in response to incoming packets, and then call set_endpoint_direct_route
-@@ -439 +477,3 @@ cmd_up() {
+@@ -435,9 +473,11 @@ cmd_up() {
+     for i in $(while read -r _ i; do for i in $i; do [[ $i =~ ^[0-9a-z:.]+/[0-9]+$ ]] && echo "$i"; done; done < <(wg show "$REAL_INTERFACE" allowed-ips) | sort -nr -k 2 -t /); do
+         add_route "$i"
+     done
+     [[ $AUTO_ROUTE4 -eq 1 || $AUTO_ROUTE6 -eq 1 ]] && set_endpoint_direct_route
 -	[[ ${#DNS[@]} -gt 0 ]] && set_dns
 +	if [[ ${#DNS[@]} -gt 0 ]]; then
 +		set_dns || echo "[!] Could not configure system DNS; tunnel remains active" >&2
 +	fi
+     monitor_daemon
+     execute_hooks "${POST_UP[@]}"
+     trap - INT TERM EXIT
+ }
