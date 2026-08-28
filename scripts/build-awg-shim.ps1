@@ -39,7 +39,7 @@ try {
   $env:CGO_ENABLED = "0"
   $env:GOOS = "windows"
   $env:GOARCH = "amd64"
-  & $go build -trimpath -ldflags "-s -w" -o $out .
+  & $go build -trimpath -ldflags "-s -w" -o $out ./cmd/awg-shim
   if ($LASTEXITCODE -ne 0) { Write-Error "go build failed ($LASTEXITCODE)" }
   Write-Host "Готово: $out"
 } finally {

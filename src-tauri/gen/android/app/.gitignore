@@ -2,6 +2,7 @@
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
 /libs/*.aar
+/libs/*-sources.jar
 /tauri.build.gradle.kts
 /proguard-tauri.pro
 /tauri.properties

@@ -88,26 +88,6 @@ pub async fn singbox_version(_app: tauri::AppHandle) -> Result<String, String> {
     Ok("sing-box 1.13.14 (Android libbox)".into())
 }
 
-fn android_supported(outbound: &Outbound) -> bool {
-    #[cfg(mobile)]
-    {
-        !matches!(outbound, Outbound::AmneziaWg { .. })
-    }
-    #[cfg(not(mobile))]
-    {
-        let _ = outbound;
-        true
-    }
-}
-
-fn ensure_android_supported(outbound: &Outbound) -> Result<(), String> {
-    if android_supported(outbound) {
-        Ok(())
-    } else {
-        Err("AmneziaWG не входит в Android-версию UniGate".into())
-    }
-}
-
 /// Возвращает текущие настройки (или значения по умолчанию, если файла нет).
 #[tauri::command]
 pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
@@ -124,10 +104,7 @@ pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settin
 /// Возвращает все профили.
 #[tauri::command]
 pub fn list_profiles(app: tauri::AppHandle) -> Result<Vec<Profile>, String> {
-    Ok(profiles::list(&app)?
-        .into_iter()
-        .filter(|profile| android_supported(&profile.outbound))
-        .collect())
+    profiles::list(&app)
 }
 
 /// Создаёт профиль с новым id, сохраняет и возвращает его.
@@ -137,7 +114,6 @@ pub fn create_profile(
     name: String,
     outbound: Outbound,
 ) -> Result<Profile, String> {
-    ensure_android_supported(&outbound)?;
     let mut all = profiles::list(&app)?;
     let profile = Profile {
         id: Uuid::new_v4().to_string(),
@@ -153,7 +129,6 @@ pub fn create_profile(
 /// Обновляет существующий профиль (по id). Ошибка, если не найден.
 #[tauri::command]
 pub fn update_profile(app: tauri::AppHandle, profile: Profile) -> Result<Profile, String> {
-    ensure_android_supported(&profile.outbound)?;
     let mut all = profiles::list(&app)?;
     let idx = all
         .iter()
@@ -185,7 +160,6 @@ pub fn import_profile(
     name: Option<String>,
 ) -> Result<Profile, String> {
     let (parsed_name, outbound) = import::parse(&input)?;
-    ensure_android_supported(&outbound)?;
     let final_name = name
         .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
@@ -217,10 +191,7 @@ pub async fn add_subscription(
     url: String,
 ) -> Result<Subscription, String> {
     let body = subscriptions::fetch(&url).await?;
-    let parsed: Vec<_> = subscriptions::parse_list(&body)
-        .into_iter()
-        .filter(|(_, outbound)| android_supported(outbound))
-        .collect();
+    let parsed = subscriptions::parse_list(&body);
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
     }
@@ -263,10 +234,7 @@ pub async fn update_subscription(
         .position(|s| s.id == id)
         .ok_or_else(|| format!("подписка {id} не найдена"))?;
     let body = subscriptions::fetch(&subs[idx].url).await?;
-    let parsed: Vec<_> = subscriptions::parse_list(&body)
-        .into_iter()
-        .filter(|(_, outbound)| android_supported(outbound))
-        .collect();
+    let parsed = subscriptions::parse_list(&body);
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
     }

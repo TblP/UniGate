@@ -29,6 +29,7 @@ import java.io.File
 @InvokeArg
 class StartVpnArgs {
     lateinit var config: String
+    var awgConfig: String? = null
     var profileName: String = "UniGate"
     var includePackages: List<String> = emptyList()
     var excludePackages: List<String> = emptyList()
@@ -154,6 +155,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             VpnQuickControl.saveConnection(
                 activity,
                 args.config,
+                args.awgConfig,
                 args.profileName,
                 args.includePackages,
                 args.excludePackages,
@@ -163,6 +165,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             val intent = Intent(activity, UniGateVpnService::class.java).apply {
                 action = UniGateVpnService.ACTION_START
                 putExtra(UniGateVpnService.EXTRA_CONFIG, args.config)
+                putExtra(UniGateVpnService.EXTRA_AWG_CONFIG, args.awgConfig)
                 putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, args.profileName)
                 putExtra(UniGateVpnService.EXTRA_START_TOKEN, startToken)
                 putStringArrayListExtra(

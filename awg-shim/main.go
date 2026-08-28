@@ -5,94 +5,131 @@
 // mixed inbound) and forwards the "via VPN" traffic to this proxy, which
 // speaks AmneziaWG to the server through gVisor netstack.
 //
-// Usage: awg-shim --conf profile.conf [--listen 127.0.0.1:2081] [--verbose]
-//
-// The process exits when stdin reaches EOF (the parent holds a pipe), so an
-// orphaned shim never outlives UniGate.
-package main
+// The desktop command lives in cmd/awg-shim. This package is also bound into
+// an Android AAR with gomobile, so both platforms use exactly the same parser,
+// AWG 3.1 engine and SOCKS implementation.
+package awgshim
 
 import (
 	"encoding/base64"
 	"encoding/hex"
-	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/netip"
-	"os"
-	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
 )
 
-func main() {
-	confPath := flag.String("conf", "", "path to AmneziaWG/WireGuard .conf (wg-quick format)")
-	listen := flag.String("listen", "127.0.0.1:2081", "SOCKS5 listen address")
-	verbose := flag.Bool("verbose", false, "verbose device log")
-	flag.Parse()
+// Protector is implemented by Android's VpnService. The AmneziaWG transport
+// sockets must be excluded from the system VPN, otherwise they loop back into
+// sing-box. Desktop callers pass nil and use their normal direct-route rule.
+type Protector interface {
+	Protect(fd int) bool
+}
 
-	if *confPath == "" {
-		fatal("missing --conf")
+type engine struct {
+	device   *device.Device
+	listener net.Listener
+}
+
+var active struct {
+	sync.Mutex
+	engine *engine
+}
+
+// Start launches the userspace AmneziaWG engine and its local SOCKS5 server.
+// It returns the actual listen address after the engine is ready.
+func Start(configText, listen string, protector Protector) (string, error) {
+	Stop()
+	if strings.TrimSpace(listen) == "" {
+		listen = "127.0.0.1:2081"
 	}
-	raw, err := os.ReadFile(*confPath)
+	cfg, err := parseConf(configText)
 	if err != nil {
-		fatal("read conf: %v", err)
-	}
-	cfg, err := parseConf(string(raw))
-	if err != nil {
-		fatal("parse conf: %v", err)
+		return "", fmt.Errorf("parse conf: %w", err)
 	}
 
 	tunDev, tnet, err := netstack.CreateNetTUN(cfg.addresses, cfg.dns, cfg.mtu)
 	if err != nil {
-		fatal("netstack: %v", err)
+		return "", fmt.Errorf("netstack: %w", err)
 	}
-	logLevel := device.LogLevelError
-	if *verbose {
-		logLevel = device.LogLevelVerbose
+	bind := conn.NewDefaultBind()
+	if protector != nil {
+		bind = &protectedBind{Bind: bind, protector: protector}
 	}
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), device.NewLogger(logLevel, "awg "))
+	dev := device.NewDevice(tunDev, bind, device.NewLogger(device.LogLevelError, "awg "))
 	if err := dev.IpcSet(cfg.uapi); err != nil {
-		fatal("device config: %v", err)
+		dev.Close()
+		return "", fmt.Errorf("device config: %w", err)
 	}
 	if err := dev.Up(); err != nil {
-		fatal("device up: %v", err)
+		dev.Close()
+		return "", fmt.Errorf("device up: %w", err)
 	}
 
 	srv := &socksServer{tnet: tnet}
-	ln, err := net.Listen("tcp", *listen)
+	ln, err := net.Listen("tcp", listen)
 	if err != nil {
-		fatal("listen %s: %v", *listen, err)
+		dev.Close()
+		return "", fmt.Errorf("listen %s: %w", listen, err)
 	}
-	// parent waits for this line before starting sing-box
-	fmt.Printf("READY %s\n", ln.Addr())
+	instance := &engine{device: dev, listener: ln}
+	active.Lock()
+	active.engine = instance
+	active.Unlock()
+	go func() { _ = srv.serve(ln) }()
+	return ln.Addr().String(), nil
+}
 
-	// lifecycle: die with the parent (stdin EOF) or on Ctrl+C
-	go func() {
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		dev.Close()
-		os.Exit(0)
-	}()
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
-	go func() {
-		<-sig
-		dev.Close()
-		os.Exit(0)
-	}()
-
-	if err := srv.serve(ln); err != nil {
-		fatal("socks5: %v", err)
+// Stop shuts down both SOCKS and the AWG device. It is safe to call repeatedly.
+func Stop() {
+	active.Lock()
+	instance := active.engine
+	active.engine = nil
+	active.Unlock()
+	if instance != nil {
+		_ = instance.listener.Close()
+		instance.device.Close()
 	}
 }
 
-func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "FATAL "+format+"\n", args...)
-	os.Exit(1)
+type protectedBind struct {
+	conn.Bind
+	protector Protector
+}
+
+func (b *protectedBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
+	receivers, actualPort, err := b.Bind.Open(port)
+	if err != nil {
+		return nil, 0, err
+	}
+	peek, ok := b.Bind.(conn.PeekLookAtSocketFd)
+	if !ok {
+		_ = b.Bind.Close()
+		return nil, 0, fmt.Errorf("AmneziaWG bind does not expose socket descriptors")
+	}
+	protected := false
+	for _, getFD := range []func() (int, error){peek.PeekLookAtSocketFd4, peek.PeekLookAtSocketFd6} {
+		fd, fdErr := getFD()
+		if fdErr != nil {
+			continue
+		}
+		if !b.protector.Protect(fd) {
+			_ = b.Bind.Close()
+			return nil, 0, fmt.Errorf("Android refused to protect AmneziaWG socket %d", fd)
+		}
+		protected = true
+	}
+	if !protected {
+		_ = b.Bind.Close()
+		return nil, 0, fmt.Errorf("AmneziaWG did not open an IPv4 or IPv6 socket")
+	}
+	return receivers, actualPort, nil
 }
 
 // ---------------------------------------------------------------------------

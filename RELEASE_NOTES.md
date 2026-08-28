@@ -1,14 +1,15 @@
-# UniGate 1.1.3 — split-tunneling AmneziaWG на macOS
+# UniGate 1.1.4 — AmneziaWG 3.1 на Android
 
-Этот релиз добавляет в macOS-версию тот же путь AmneziaWG через sing-box, который уже используется на Windows.
+В Android-версию добавлен AmneziaWG 1.5/3.1 через общий userspace `awg-shim`.
 
 ## Что нового
 
-- AmneziaWG на macOS работает через userspace `awg-shim` и sing-box.
-- Для AmneziaWG заработал обход RU-трафика, LAN и split-tunneling по приложениям.
-- Добавлена живая статистика скорости и трафика AmneziaWG на macOS.
-- Доменные endpoint AmneziaWG предварительно разрешаются в IP, чтобы исключить петлю трафика через TUN.
-- Прежний `awg-quick` сохранён как запасной движок, если shim недоступен.
+- Профили AmneziaWG теперь импортируются из `vpn://`, отображаются и подключаются на Android.
+- `awg-shim` встроен в APK как ARM64 gomobile-библиотека и использует `amneziawg-go/v3 v3.1.20260814`.
+- sing-box остаётся владельцем Android VPN, поэтому для AmneziaWG работают RU/LAN-обход, split-tunneling по приложениям и живая статистика.
+- Транспортные UDP-сокеты AmneziaWG защищаются через `VpnService.protect(fd)`, чтобы исключить петлю через собственный TUN.
+- Быстрое подключение, Always-on, плитка и виджеты восстанавливают сохранённый AWG-сеанс.
+- Desktop `awg-shim` и Android-библиотека теперь собираются из одного общего Go-пакета с поддержкой полей AWG 3.1.
 
 ## Установка
 
@@ -19,4 +20,4 @@
 - **macOS:** после установки выполните
   `sudo xattr -dr com.apple.quarantine /Applications/UniGate.app`
 
-> Android APK предназначен для устройств ARM64.
+> Android APK предназначен для устройств ARM64. Подключение AmneziaWG 3.1 требует финальной проверки на физическом устройстве.

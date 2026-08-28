@@ -257,9 +257,7 @@ function MobileConnection() {
             onChange={(event) => void setActiveProfile(event.target.value || null)}
           >
             <option value="">Выберите профиль</option>
-            {profiles
-              .filter((profile) => profile.outbound.type !== "amnezia_wg")
-              .map((profile) => (
+            {profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.name} · {serverAddress(profile)}
                 </option>

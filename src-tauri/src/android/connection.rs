@@ -12,6 +12,7 @@ use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const EVENT: &str = "connection-state";
+const AWG_SHIM_PORT: u16 = 2081;
 
 pub struct Connection(pub Mutex<ConnectionState>);
 
@@ -27,6 +28,7 @@ struct VpnPlugin<R: Runtime>(PluginHandle<R>);
 #[serde(rename_all = "camelCase")]
 struct StartRequest {
     config: String,
+    awg_config: Option<String>,
     profile_name: String,
     include_packages: Vec<String>,
     exclude_packages: Vec<String>,
@@ -118,7 +120,7 @@ pub fn local_proxy_addr() -> String {
 
 #[tauri::command]
 pub fn awg_shim_available() -> bool {
-    false
+    true
 }
 
 pub async fn list_installed_apps(app: AppHandle) -> Result<Vec<InstalledApp>, String> {
@@ -159,10 +161,6 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         .find(|profile| profile.id == profile_id)
         .ok_or_else(|| "Профиль не найден".to_string())?;
 
-    if matches!(profile.outbound, Outbound::AmneziaWg { .. }) {
-        return Err("AmneziaWG не входит в Android-версию UniGate".into());
-    }
-
     set_state(&app, ConnectionState::Connecting);
     let app_settings = settings::load(&app)?;
 
@@ -194,8 +192,24 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         None
     };
 
+    // Android embeds the same AWG 3.1 userspace shim as desktop. sing-box sees
+    // it as a local SOCKS5 outbound and therefore keeps RU/LAN/per-app split
+    // and Clash API statistics for AmneziaWG profiles too.
+    let awg_config = match &profile.outbound {
+        Outbound::AmneziaWg { config, .. } => Some(config.clone()),
+        _ => None,
+    };
+    let mut generated_profile = profile.clone();
+    if awg_config.is_some() {
+        generated_profile.outbound = Outbound::Socks {
+            server: "127.0.0.1".into(),
+            port: AWG_SHIM_PORT,
+            username: None,
+            password: None,
+        };
+    }
     let config = config::generate(
-        &profile,
+        &generated_profile,
         Mode::Tun,
         0,
         &routing,
@@ -244,6 +258,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
 
     let request = StartRequest {
         config,
+        awg_config,
         profile_name: profile.name,
         include_packages,
         exclude_packages,

@@ -12,6 +12,7 @@ import com.unigate.app.MainActivity
 object VpnQuickControl {
     data class SavedConnection(
         val config: String,
+        val awgConfig: String?,
         val profileName: String,
         val includePackages: List<String>,
         val excludePackages: List<String>,
@@ -29,6 +30,7 @@ object VpnQuickControl {
 
     private const val PREFS = "unigate_quick_control"
     private const val KEY_CONFIG = "config"
+    private const val KEY_AWG_CONFIG = "awg_config"
     private const val KEY_PROFILE_NAME = "profile_name"
     private const val KEY_INCLUDE_PACKAGES = "include_packages"
     private const val KEY_EXCLUDE_PACKAGES = "exclude_packages"
@@ -38,6 +40,7 @@ object VpnQuickControl {
     fun saveConnection(
         context: Context,
         config: String,
+        awgConfig: String?,
         profileName: String,
         includePackages: List<String>,
         excludePackages: List<String>,
@@ -45,6 +48,7 @@ object VpnQuickControl {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_CONFIG, config)
+            .putString(KEY_AWG_CONFIG, awgConfig)
             .putString(KEY_PROFILE_NAME, profileName)
             .putStringSet(KEY_INCLUDE_PACKAGES, includePackages.toSet())
             .putStringSet(KEY_EXCLUDE_PACKAGES, excludePackages.toSet())
@@ -61,6 +65,7 @@ object VpnQuickControl {
         val config = prefs.getString(KEY_CONFIG, null)?.takeIf { it.isNotBlank() } ?: return null
         return SavedConnection(
             config = config,
+            awgConfig = prefs.getString(KEY_AWG_CONFIG, null)?.takeIf { it.isNotBlank() },
             profileName = prefs.getString(KEY_PROFILE_NAME, "UniGate").orEmpty().ifBlank { "UniGate" },
             includePackages = prefs.getStringSet(KEY_INCLUDE_PACKAGES, emptySet()).orEmpty().toList(),
             excludePackages = prefs.getStringSet(KEY_EXCLUDE_PACKAGES, emptySet()).orEmpty().toList(),
@@ -106,6 +111,7 @@ object VpnQuickControl {
         val intent = Intent(context, UniGateVpnService::class.java).apply {
             action = UniGateVpnService.ACTION_START
             putExtra(UniGateVpnService.EXTRA_CONFIG, connection.config)
+            putExtra(UniGateVpnService.EXTRA_AWG_CONFIG, connection.awgConfig)
             putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, connection.profileName)
             putExtra(UniGateVpnService.EXTRA_START_TOKEN, UniGateVpnService.beginStart())
             putStringArrayListExtra(

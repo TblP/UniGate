@@ -20,6 +20,8 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.core.app.NotificationCompat
+import com.unigate.app.awgshim.Awgshim
+import com.unigate.app.awgshim.Protector
 import com.unigate.app.MainActivity
 import com.unigate.app.R
 import io.nekohasekai.libbox.CommandServer
@@ -49,6 +51,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         const val ACTION_START = "com.unigate.app.vpn.START"
         const val ACTION_STOP = "com.unigate.app.vpn.STOP"
         const val EXTRA_CONFIG = "config"
+        const val EXTRA_AWG_CONFIG = "awgConfig"
         const val EXTRA_PROFILE_NAME = "profileName"
         const val EXTRA_INCLUDE_PACKAGES = "includePackages"
         const val EXTRA_EXCLUDE_PACKAGES = "excludePackages"
@@ -117,6 +120,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         }
 
         val explicitConfig = intent?.getStringExtra(EXTRA_CONFIG)
+        val explicitAwgConfig = intent?.getStringExtra(EXTRA_AWG_CONFIG)
         val alwaysOnRequested = intent?.action == SERVICE_INTERFACE ||
             (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isAlwaysOn)
         val restoreRequested = VpnStartPolicy.shouldRestore(
@@ -126,6 +130,11 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         )
         val saved = if (restoreRequested) VpnQuickControl.savedConnection(this) else null
         val config = explicitConfig?.takeIf { it.isNotBlank() } ?: saved?.config
+        val awgConfig = if (explicitConfig != null) {
+            explicitAwgConfig?.takeIf { it.isNotBlank() }
+        } else {
+            saved?.awgConfig
+        }
         if (config.isNullOrBlank()) {
             liveState = VpnQuickControl.State.OFF
             VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
@@ -148,7 +157,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
 
         Thread {
             runCatching {
-                startVpn(config, includePackages, excludePackages)
+                startVpn(config, awgConfig, includePackages, excludePackages)
             }.onSuccess {
                 finishStart(startToken, null)
                 liveState = VpnQuickControl.State.ON
@@ -169,10 +178,21 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     @Synchronized
     private fun startVpn(
         config: String,
+        awgConfig: String?,
         includePackages: List<String>,
         excludePackages: List<String>,
     ) {
         closeCore()
+        if (!awgConfig.isNullOrBlank()) {
+            Awgshim.start(
+                awgConfig,
+                "127.0.0.1:2081",
+                object : Protector {
+                    override fun protect(fd: Long): Boolean =
+                        this@UniGateVpnService.protect(fd.toInt())
+                },
+            )
+        }
         setupLibbox()
 
         val server = CommandServer(this, this)
@@ -244,6 +264,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
+        runCatching { Awgshim.stop() }
         tunnel?.close()
         tunnel = null
         defaultNetworkCallback?.let { runCatching { connectivity.unregisterNetworkCallback(it) } }

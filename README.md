@@ -27,7 +27,7 @@
 ## Поддерживаемые протоколы
 
 * Hysteria 2
-* AmneziaWG *(Windows — движок amneziawg; macOS — amneziawg-go + awg-quick, экспериментально; Android пока не поддерживается)*
+* AmneziaWG 1.5 / 3.1 *(Windows/macOS/Android — userspace awg-shim + sing-box; desktop имеет legacy fallback)*
 * SOCKS5
 * HTTP / HTTPS
 * Shadowsocks
@@ -45,7 +45,7 @@
 | GUI-оболочка | Tauri 2 (Rust) |
 | Фронтенд | React + TypeScript + Vite (Zustand) |
 | Сетевое ядро | sing-box (sidecar на desktop, libbox на Android) |
-| AmneziaWG | amneziawg (Windows) |
+| AmneziaWG | awg-shim + amneziawg-go/v3 (Windows, macOS, Android) |
 
 ## Готовые сборки
 

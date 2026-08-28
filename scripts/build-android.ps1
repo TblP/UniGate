@@ -17,6 +17,7 @@ $sdkDir = Join-Path $ToolRoot "android-sdk"
 $ndkDir = Join-Path $sdkDir "ndk\28.0.13004108"
 $targetDir = Join-Path $env:LOCALAPPDATA "unigate-android-target"
 $aar = Join-Path $projectRoot "src-tauri\gen\android\app\libs\libbox.aar"
+$awgAar = Join-Path $projectRoot "src-tauri\gen\android\app\libs\awgshim.aar"
 $androidIcons = Join-Path $projectRoot "src-tauri\icons\android"
 $androidResources = Join-Path $projectRoot "src-tauri\gen\android\app\src\main\res"
 $geoipSource = Join-Path $projectRoot "src-tauri\binaries\geoip-ru.srs"
@@ -24,6 +25,18 @@ $androidAssets = Join-Path $projectRoot "src-tauri\gen\android\app\src\main\asse
 
 if (-not (Test-Path -LiteralPath $aar)) {
   & (Join-Path $PSScriptRoot "build-libbox-android.ps1") -ToolRoot $ToolRoot
+}
+$awgSourceDir = Join-Path $projectRoot "awg-shim"
+$awgNeedsBuild = -not (Test-Path -LiteralPath $awgAar)
+if (-not $awgNeedsBuild) {
+  $awgAarTime = (Get-Item -LiteralPath $awgAar).LastWriteTimeUtc
+  $awgNeedsBuild = Get-ChildItem -LiteralPath $awgSourceDir -Recurse -File |
+    Where-Object { $_.Extension -eq ".go" -or $_.Name -in @("go.mod", "go.sum") } |
+    Where-Object { $_.LastWriteTimeUtc -gt $awgAarTime } |
+    Select-Object -First 1
+}
+if ($awgNeedsBuild) {
+  & (Join-Path $PSScriptRoot "build-awg-shim-android.ps1") -ToolRoot $ToolRoot
 }
 
 # `tauri android init` starts with the generic Tauri launcher. Keep Android

@@ -1,7 +1,7 @@
 // Minimal SOCKS5 server (RFC 1928, no auth) dialing through netstack:
 // CONNECT for TCP, UDP ASSOCIATE for UDP. Enough for sing-box's socks
 // outbound; BIND is not implemented.
-package main
+package awgshim
 
 import (
 	"context"

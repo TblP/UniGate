@@ -113,7 +113,7 @@ SHIM_REBUILD=false
 if [ ! -x "$SHIM_DEST" ]; then
   SHIM_REBUILD=true
 else
-  for source in "$ROOT/awg-shim"/*.go "$ROOT/awg-shim/go.mod" "$ROOT/awg-shim/go.sum"; do
+  for source in "$ROOT/awg-shim"/*.go "$ROOT/awg-shim/cmd/awg-shim"/*.go "$ROOT/awg-shim/go.mod" "$ROOT/awg-shim/go.sum"; do
     if [ "$source" -nt "$SHIM_DEST" ]; then
       SHIM_REBUILD=true
       break
@@ -127,7 +127,7 @@ else
   (
     cd "$ROOT/awg-shim"
     CGO_ENABLED=0 GOOS=darwin GOARCH="$GO_ARCH" \
-      go build -trimpath -ldflags="-s -w" -o "$SHIM_DEST" .
+      go build -trimpath -ldflags="-s -w" -o "$SHIM_DEST" ./cmd/awg-shim
   )
   chmod +x "$SHIM_DEST"
   echo "Готово: $SHIM_DEST"
