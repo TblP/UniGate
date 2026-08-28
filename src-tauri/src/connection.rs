@@ -1209,7 +1209,7 @@ fn connect_tun_macos(app: &AppHandle, cfg_path: &std::path::Path) -> Result<Conn
 /// /installtunnelservice`; macOS — `awg-quick up` (amneziawg-go userspace).
 /// Всегда требует прав администратора; статистики Clash API у него нет.
 #[cfg(any(target_os = "macos", test))]
-fn normalize_awg_config_for_macos(config: &str) -> String {
+fn normalize_awg_config_for_macos(config: &str, keep_ipv6_routes: bool) -> String {
     let is_empty_concealment = |line: &str| {
         let Some((key, value)) = line.trim().split_once('=') else {
             return false;
@@ -1222,14 +1222,49 @@ fn normalize_awg_config_for_macos(config: &str) -> String {
         is_i1_i5 && (value.is_empty() || value == "''" || value == "\"\"")
     };
 
+    let filter_allowed_ips = |line: &str| -> Option<String> {
+        if keep_ipv6_routes {
+            return None;
+        }
+        let (key, value) = line.split_once('=')?;
+        if !key.trim().eq_ignore_ascii_case("AllowedIPs") {
+            return None;
+        }
+        let ipv4_routes = value
+            .split(',')
+            .map(str::trim)
+            .filter(|route| !route.is_empty() && !route.contains(':'))
+            .collect::<Vec<_>>();
+        Some(if ipv4_routes.is_empty() {
+            String::new()
+        } else {
+            format!("{}= {}", key, ipv4_routes.join(", "))
+        })
+    };
+
     let mut normalized = String::with_capacity(config.len());
     for segment in config.split_inclusive('\n') {
+        let newline = if segment.ends_with("\r\n") {
+            "\r\n"
+        } else if segment.ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
         let line = segment
             .strip_suffix('\n')
             .unwrap_or(segment)
             .strip_suffix('\r')
             .unwrap_or_else(|| segment.strip_suffix('\n').unwrap_or(segment));
-        if !is_empty_concealment(line) {
+        if is_empty_concealment(line) {
+            continue;
+        }
+        if let Some(filtered) = filter_allowed_ips(line) {
+            if !filtered.is_empty() {
+                normalized.push_str(&filtered);
+                normalized.push_str(newline);
+            }
+        } else {
             normalized.push_str(segment);
         }
     }
@@ -1250,10 +1285,12 @@ async fn connect_amneziawg(app: &AppHandle, config: &str) -> Result<ConnectionSt
     let conf_path = storage::path(app, AWG_CONF)?;
     // awg(8) on Unix rejects explicit empty AWG 2.0 concealment fields (`I2 =`),
     // while an omitted field has the same zero-value semantics. Amnezia containers
-    // commonly emit empty I2-I5, so remove only empty I1-I5 on macOS. Filled
-    // concealment packets and the stored/exported profile remain untouched.
+    // commonly emit empty I2-I5, so remove only empty I1-I5 on macOS. When the
+    // current network has no IPv6 default route, also omit IPv6 AllowedIPs: the
+    // macOS route tool otherwise reports "Network is unreachable" during setup.
+    // Filled concealment packets and the stored/exported profile remain untouched.
     #[cfg(target_os = "macos")]
-    let config_to_write = normalize_awg_config_for_macos(config);
+    let config_to_write = normalize_awg_config_for_macos(config, has_ipv6_route());
     #[cfg(not(target_os = "macos"))]
     let config_to_write = config;
     if let Err(e) = std::fs::write(&conf_path, config_to_write) {
@@ -1458,7 +1495,7 @@ mod tests {
     #[test]
     fn macos_awg_drops_only_empty_concealment_packets() {
         let config = "[Interface]\r\nI1 = <b 0x01>\r\nI2 =\r\nI3 = ''\r\nI4 = \"\"\r\nI5 = <b 0x05>\r\nJc = 5\r\n[Peer]\r\nPublicKey = PUB\r\n";
-        let normalized = normalize_awg_config_for_macos(config);
+        let normalized = normalize_awg_config_for_macos(config, true);
 
         assert!(normalized.contains("I1 = <b 0x01>\r\n"));
         assert!(normalized.contains("I5 = <b 0x05>\r\n"));
@@ -1471,6 +1508,23 @@ mod tests {
     #[test]
     fn macos_awg_preserves_config_without_empty_i_fields_exactly() {
         let config = "[Interface]\nI2 = <b 0x02>\n[Peer]\nEndpoint = 1.2.3.4:1234";
-        assert_eq!(normalize_awg_config_for_macos(config), config);
+        assert_eq!(normalize_awg_config_for_macos(config, true), config);
+    }
+
+    #[test]
+    fn macos_awg_drops_ipv6_routes_when_the_network_has_no_ipv6() {
+        let config = "[Interface]\r\nAddress = 10.8.1.7/32\r\n[Peer]\r\nAllowedIPs = 0.0.0.0/0, ::/0, 10.0.0.0/8, 2001:db8::/32\r\nEndpoint = 192.0.2.1:51820\r\n";
+        let normalized = normalize_awg_config_for_macos(config, false);
+
+        assert!(normalized.contains("AllowedIPs = 0.0.0.0/0, 10.0.0.0/8\r\n"));
+        assert!(!normalized.contains("::/0"));
+        assert!(!normalized.contains("2001:db8::/32"));
+        assert!(normalized.contains("Endpoint = 192.0.2.1:51820\r\n"));
+    }
+
+    #[test]
+    fn macos_awg_keeps_ipv6_routes_when_the_network_supports_ipv6() {
+        let config = "[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\n";
+        assert_eq!(normalize_awg_config_for_macos(config, true), config);
     }
 }

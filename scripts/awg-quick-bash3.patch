@@ -83,14 +83,16 @@ diff --git a/src/wg-quick/darwin.bash b/src/wg-quick/darwin.bash
 +			SERVICE_INDEX=$((${#SERVICE_NAMES[@]} - 1))
 +		fi
 +		[[ -n ${SERVICE_DNS[$SERVICE_INDEX]} ]] && continue
- 		get_response="$(cmd networksetup -getdnsservers "$service")"
+-		get_response="$(cmd networksetup -getdnsservers "$service")"
++		get_response="$(cmd networksetup -getdnsservers "$service" || true)"
  		[[ $get_response == *" "* ]] && get_response="Empty"
 -		[[ -n $get_response ]] && SERVICE_DNS["$service"]="$get_response"
 +		# Some macOS network services (notably USB Ethernet adapters) return
-+		# an empty successful response.  With `set -e`, the upstream
-+		# `[[ -n ... ]] && assignment` then aborts the whole tunnel setup.
++		# an empty response or a non-zero status. With `set -e`, either case
++		# would abort the whole tunnel setup.
 +		SERVICE_DNS[$SERVICE_INDEX]="${get_response:-Empty}"
- 		get_response="$(cmd networksetup -getsearchdomains "$service")"
+-		get_response="$(cmd networksetup -getsearchdomains "$service")"
++		get_response="$(cmd networksetup -getsearchdomains "$service" || true)"
  		[[ $get_response == *" "* ]] && get_response="Empty"
 -		[[ -n $get_response ]] && SERVICE_DNS_SEARCH["$service"]="$get_response"
 +		SERVICE_DNS_SEARCH[$SERVICE_INDEX]="${get_response:-Empty}"

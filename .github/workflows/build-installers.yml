@@ -119,14 +119,22 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Android требует техническую подпись APK даже для sideload. Храним
-      # self-signed debug key в Actions cache, чтобы следующие версии могли
-      # устанавливаться поверх предыдущих. Доверенной publisher-подписи нет.
+      # Android разрешает обновление только APK с тем же сертификатом. Cache
+      # изолирован по git-ref и может быть удалён, поэтому ключ держим в Secret;
+      # при его отсутствии сборка обязана упасть, а не выпустить несовместимый APK.
       - name: Restore Android self-signed key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: unigate-android-debug-keystore-v1
+        shell: pwsh
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_DEBUG_KEYSTORE_BASE64)) {
+            throw "ANDROID_DEBUG_KEYSTORE_BASE64 secret is not configured"
+          }
+          $androidHome = Join-Path $HOME ".android"
+          New-Item -ItemType Directory -Force -Path $androidHome | Out-Null
+          $keyPath = Join-Path $androidHome "debug.keystore"
+          $keyBytes = [Convert]::FromBase64String($env:ANDROID_DEBUG_KEYSTORE_BASE64)
+          [IO.File]::WriteAllBytes($keyPath, $keyBytes)
 
       - name: Setup Android toolchain
         shell: pwsh
@@ -139,6 +147,22 @@ jobs:
       - name: Build Android ARM64 APK
         shell: pwsh
         run: scripts/build-android.ps1
+
+      - name: Verify Android APK
+        shell: pwsh
+        run: |
+          $apk = Get-ChildItem -LiteralPath dist/android -Filter "UniGate_*_android_arm64.apk" |
+            Select-Object -First 1
+          if (-not $apk) { throw "Android APK was not produced" }
+          $apksigner = Join-Path $env:LOCALAPPDATA "unigate-android-tools/android-sdk/build-tools/36.0.0/apksigner.bat"
+          $signatureReport = (& $apksigner verify --verbose --print-certs $apk.FullName 2>&1 | Out-String)
+          $verifyExitCode = $LASTEXITCODE
+          Write-Host $signatureReport
+          if ($verifyExitCode -ne 0) { throw "Android APK signature verification failed" }
+          $expectedCertificate = "9dc091d6e53b4f3e324d964955f9027615d0961cb61c74d5cb975741f36b0099"
+          if ($signatureReport -notmatch "Signer #1 certificate SHA-256 digest:\s*$expectedCertificate") {
+            throw "Android APK was signed by an unexpected certificate"
+          }
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
