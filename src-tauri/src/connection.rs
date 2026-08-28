@@ -253,16 +253,24 @@ fn binaries_file(name: &str) -> Option<std::path::PathBuf> {
 }
 
 /// Путь к awg-shim — userspace AmneziaWG, торчащий локальным SOCKS5
-/// (собирается scripts/build-awg-shim.ps1; prod: externalBin кладёт рядом с exe
-/// без triple-суффикса). Пока только Windows: на macOS AmneziaWG работает через
-/// awg-quick, мигрируем на шим после обкатки.
+/// (Windows: scripts/build-awg-shim.ps1; macOS: scripts/fetch-awg-macos.sh).
+/// В prod externalBin кладёт его в каталог исполняемых файлов без triple-суффикса.
 fn awg_shim_exe() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
         binaries_file("awg-shim-x86_64-pc-windows-msvc.exe")
             .or_else(|| binaries_file("awg-shim.exe"))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        const NAMES: [&str; 3] = [
+            "awg-shim-aarch64-apple-darwin",
+            "awg-shim-x86_64-apple-darwin",
+            "awg-shim",
+        ];
+        NAMES.into_iter().find_map(binaries_file)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         None
     }
@@ -272,8 +280,7 @@ fn awg_shim_exe() -> Option<std::path::PathBuf> {
 /// UniGate → закрылся пайп → шим выходит сам) и ждёт строку `READY` — к этому
 /// моменту endpoint разрезолвлен и SOCKS5 слушает. Ошибка старта — из stderr.
 async fn start_awg_shim(app: &AppHandle, conf: &str) -> Result<std::process::Child, String> {
-    let exe = awg_shim_exe()
-        .ok_or("awg-shim не найден рядом с приложением (scripts/build-awg-shim.ps1)")?;
+    let exe = awg_shim_exe().ok_or("awg-shim не найден рядом с приложением")?;
     let conf_path = storage::path(app, SHIM_CONF)?;
     std::fs::write(&conf_path, conf)
         .map_err(|e| format!("не удалось записать {SHIM_CONF}: {e}"))?;
@@ -955,7 +962,8 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     );
 
     // Трафик самого шима (UDP к AWG-серверу) обязан идти мимо TUN, иначе цикл:
-    // правило по имени процесса + (если сервер задан IP-литералом) по адресу.
+    // правило по имени процесса + по IP endpoint. Доменный endpoint мы
+    // предрезолвим до подъёма TUN; IP-литерал берём из профиля.
     // В proxy-режиме route-правил в конфиге нет — блок no-op.
     if awg_shim {
         if let Some(rules) = cfg
@@ -969,14 +977,20 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
             {
                 extra.push(serde_json::json!({ "process_name": [name], "outbound": "direct" }));
             }
+            let mut endpoint_ips = bootstrap_ips.clone();
             if let Outbound::AmneziaWg { server, .. } = &profile.outbound {
                 if let Ok(ip) = server.parse::<std::net::IpAddr>() {
-                    let prefix = if ip.is_ipv4() { 32 } else { 128 };
-                    extra.push(serde_json::json!({
-                        "ip_cidr": [format!("{ip}/{prefix}")],
-                        "outbound": "direct"
-                    }));
+                    endpoint_ips.push(ip);
                 }
+            }
+            endpoint_ips.sort();
+            endpoint_ips.dedup();
+            for ip in endpoint_ips {
+                let prefix = if ip.is_ipv4() { 32 } else { 128 };
+                extra.push(serde_json::json!({
+                    "ip_cidr": [format!("{ip}/{prefix}")],
+                    "outbound": "direct"
+                }));
             }
             // после sniff + hijack-dns (первые два правила), до обходов/per-app
             let at = 2.min(rules.len());
@@ -1023,15 +1037,6 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         }
     }
 
-    // macOS + TUN: sing-box нужен root (создать utun + маршруты).
-    // Если приложение УЖЕ запущено от админа (euid==0) — запускаем sing-box обычным
-    // дочерним процессом (наследует root, есть отслеживание падений), как на Windows.
-    // Если нет — поднимаем sing-box от root через osascript (см. connect_tun_macos).
-    #[cfg(target_os = "macos")]
-    if mode == Mode::Tun && !elevation::is_elevated() {
-        return connect_tun_macos(&app, &path);
-    }
-
     // AmneziaWG: шим поднимаем ДО ядра — он резолвит endpoint системным
     // резолвером (наш TUN ещё не активен) и начинает слушать SOCKS5
     let mut shim_child: Option<std::process::Child> = None;
@@ -1045,6 +1050,24 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
                 }
             }
         }
+    }
+
+    // macOS + TUN: sing-box нужен root (создать utun + маршруты).
+    // Важно попасть сюда уже ПОСЛЕ старта awg-shim: root sing-box получает
+    // готовый SOCKS5 на 127.0.0.1:2081. Handle шима храним в state, потому
+    // что root-процесс sing-box не является нашим CommandChild.
+    #[cfg(target_os = "macos")]
+    if mode == Mode::Tun && !elevation::is_elevated() {
+        if let Some(shim) = shim_child.take() {
+            let conn = app.state::<Connection>();
+            let mut guard = conn.0.lock().map_err(|e| e.to_string())?;
+            guard.shim = Some(shim);
+        }
+        let result = connect_tun_macos(&app, &path);
+        if result.is_err() {
+            kill_shim(&app);
+        }
+        return result;
     }
 
     // запускаем sing-box
@@ -1236,6 +1259,8 @@ fn connect_tun_macos(app: &AppHandle, cfg_path: &std::path::Path) -> Result<Conn
                 if let Ok(sent) = storage::path(&app_watch, TUN_SENTINEL) {
                     let _ = std::fs::remove_file(sent);
                 }
+                // root sing-box больше не использует локальный AWG SOCKS.
+                kill_shim(&app_watch);
                 let mut msg = "sing-box (TUN) неожиданно завершился".to_string();
                 if let Some(tail) = log_tail(&app_watch, 5) {
                     msg = format!("{msg}:\n{tail}");

@@ -51,7 +51,7 @@ jobs:
         run: npm ci
 
       # awg-shim (userspace AmneziaWG → SOCKS5) собирается из awg-shim/ на Go
-      # внутри fetch-скрипта. Пока только Windows: на macOS AmneziaWG — awg-quick.
+      # внутри platform fetch-скриптов для Windows и macOS.
       - name: Setup Go
         uses: actions/setup-go@v5
         with:

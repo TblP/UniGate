@@ -2,7 +2,8 @@
 # Собирает движок AmneziaWG для macOS и кладёт в src-tauri/binaries/:
 #   - amneziawg-go  — userspace-датапас (создаёт utun, крутит крипту)
 #   - awg           — UAPI-конфигуратор (аналог wg)
-#   - awg-quick     — bash-обёртка: поднимает utun+адреса+маршруты+DNS из .conf
+#   - awg-quick     — legacy bash-обёртка: поднимает utun+маршруты
+#   - awg-shim      — основной движок: userspace AWG -> SOCKS5 для sing-box
 #
 # Prebuilt-бинарников у amneziawg-go/amneziawg-tools нет — собираем из исходников.
 # Нужны: Go, make, git, Xcode Command Line Tools (clang). Только macOS.
@@ -35,6 +36,12 @@ done
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$ROOT/src-tauri/binaries"
 mkdir -p "$BIN_DIR"
+
+case "$(uname -m)" in
+  arm64) TARGET_TRIPLE="aarch64-apple-darwin"; GO_ARCH="arm64" ;;
+  x86_64) TARGET_TRIPLE="x86_64-apple-darwin"; GO_ARCH="amd64" ;;
+  *) echo "Неподдерживаемая архитектура macOS: $(uname -m)" >&2; exit 1 ;;
+esac
 
 STAMP="$BIN_DIR/.awg-macos-version"
 PATCH_HASH="$(git hash-object "$ROOT/scripts/awg-quick-bash3.patch")"
@@ -97,4 +104,33 @@ else
 fi
 
 printf '%s\n' "$EXPECTED_VERSION" > "$STAMP"
-echo "AmneziaWG-движок для macOS готов в $BIN_DIR"
+
+# --- awg-shim (AmneziaWG -> local SOCKS5 -> sing-box) ---
+# CGO не нужен: шим использует userspace netstack. Имя с target triple
+# нужно Tauri externalBin; внутри .app файл будет называться awg-shim.
+SHIM_DEST="$BIN_DIR/awg-shim-$TARGET_TRIPLE"
+SHIM_REBUILD=false
+if [ ! -x "$SHIM_DEST" ]; then
+  SHIM_REBUILD=true
+else
+  for source in "$ROOT/awg-shim"/*.go "$ROOT/awg-shim/go.mod" "$ROOT/awg-shim/go.sum"; do
+    if [ "$source" -nt "$SHIM_DEST" ]; then
+      SHIM_REBUILD=true
+      break
+    fi
+  done
+fi
+if [ "$SHIM_REBUILD" = false ]; then
+  echo "awg-shim уже на месте"
+else
+  echo "Собираю awg-shim…"
+  (
+    cd "$ROOT/awg-shim"
+    CGO_ENABLED=0 GOOS=darwin GOARCH="$GO_ARCH" \
+      go build -trimpath -ldflags="-s -w" -o "$SHIM_DEST" .
+  )
+  chmod +x "$SHIM_DEST"
+  echo "Готово: $SHIM_DEST"
+fi
+
+echo "AmneziaWG-движок и shim для macOS готовы в $BIN_DIR"

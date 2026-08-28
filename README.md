@@ -76,7 +76,7 @@ npm install                      # зависимости фронта
 # бинарники ядра в git не хранятся — тянутся скриптом:
 pwsh scripts/fetch-singbox.ps1   # Windows: sing-box + wintun + amneziawg + geoip
 bash scripts/fetch-singbox.sh    # macOS/Linux: sing-box + geoip
-bash scripts/fetch-awg-macos.sh  # macOS: движок AmneziaWG (собирает зафиксированные версии, нужен Go)
+bash scripts/fetch-awg-macos.sh  # macOS: awg-shim + legacy AmneziaWG fallback (нужен Go)
 
 # Android ARM64 (Windows-hosted portable toolchain):
 pwsh scripts/setup-android.ps1

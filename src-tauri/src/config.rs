@@ -70,7 +70,8 @@ pub fn generate_with_vpn_routes(
 }
 
 /// Домен сервера outbound, если это именно домен (IP-литерал → None).
-/// Для AmneziaWG не применимо (свой движок, не sing-box).
+/// AmneziaWG тоже участвует: awg-shim должен заранее узнать IP
+/// endpoint, чтобы его UDP-сокет гарантированно шёл direct и не зацикливался.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn server_domain(outbound: &Outbound) -> Option<&str> {
     let server = match outbound {
@@ -81,8 +82,8 @@ pub fn server_domain(outbound: &Outbound) -> Option<&str> {
         | Outbound::Trojan { server, .. }
         | Outbound::Vless { server, .. }
         | Outbound::Vmess { server, .. }
-        | Outbound::Tuic { server, .. } => server,
-        Outbound::AmneziaWg { .. } => return None,
+        | Outbound::Tuic { server, .. }
+        | Outbound::AmneziaWg { server, .. } => server,
     };
     if server.parse::<std::net::IpAddr>().is_ok() {
         None
@@ -857,6 +858,12 @@ mod tests {
     fn server_domain_skips_ip_literals() {
         assert_eq!(server_domain(&domain_profile().outbound), Some("vpn.example.com"));
         assert_eq!(server_domain(&socks_profile().outbound), None); // 1.2.3.4
+        let awg = Outbound::AmneziaWg {
+            config: String::new(),
+            server: "awg.example.com".into(),
+            port: 51820,
+        };
+        assert_eq!(server_domain(&awg), Some("awg.example.com"));
     }
 
     #[cfg(not(target_os = "windows"))]
