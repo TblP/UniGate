@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/amnezia-vpn/amneziawg-go/conn"
-	"github.com/amnezia-vpn/amneziawg-go/device"
-	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
 )
 
 func main() {
@@ -106,13 +106,27 @@ type shimConf struct {
 	uapi      string
 }
 
-// AmneziaWG obfuscation keys passed through to UAPI verbatim (values are
-// numbers, "a-b" ranges for h1..h4 or "<b 0x..>" packet specs for i1..i5).
-var awgKeys = []string{
-	"jc", "jmin", "jmax",
-	"s1", "s2", "s3", "s4",
-	"h1", "h2", "h3", "h4",
-	"i1", "i2", "i3", "i4", "i5",
+type awgField struct {
+	conf string
+	uapi string
+}
+
+// AmneziaWG interface fields. Config names are normalized to lower-case by
+// parseConf; UAPI uses snake_case for the 3.x parameters.
+var awgFields = []awgField{
+	{"jc", "jc"}, {"jmin", "jmin"}, {"jmax", "jmax"},
+	{"s1", "s1"}, {"s2", "s2"}, {"s3", "s3"}, {"s4", "s4"},
+	{"h1", "h1"}, {"h2", "h2"}, {"h3", "h3"}, {"h4", "h4"},
+	{"i1", "i1"}, {"i2", "i2"}, {"i3", "i3"}, {"i4", "i4"}, {"i5", "i5"},
+	{"headerprotectionkey", "header_protection_key"},
+	{"contentpaddingaddition", "content_padding_addition"},
+	{"rekeyaftertime", "rekey_after_time"},
+	{"rekeytimeout", "rekey_timeout"},
+	{"rejectaftertime", "reject_after_time"},
+	{"keepalivetimeout", "keepalive_timeout"},
+	{"maxhandshakeattempts", "max_handshake_attempts"},
+	{"randomtrailers", "random_trailers"},
+	{"disablecookies", "disable_cookies"},
 }
 
 func parseConf(text string) (*shimConf, error) {
@@ -181,9 +195,21 @@ func parseConf(text string) (*shimConf, error) {
 		return nil, fmt.Errorf("PrivateKey: %w", err)
 	}
 	fmt.Fprintf(&b, "private_key=%s\n", priv)
-	for _, k := range awgKeys {
-		if v, ok := iface[k]; ok && v != "" {
-			fmt.Fprintf(&b, "%s=%s\n", k, v)
+	for _, field := range awgFields {
+		if v, ok := iface[field.conf]; ok && v != "" {
+			switch field.conf {
+			case "headerprotectionkey":
+				v, err = awgKeyToHex(v)
+				if err != nil {
+					return nil, fmt.Errorf("HeaderProtectionKey: %w", err)
+				}
+			case "randomtrailers", "disablecookies":
+				v, err = awgBool(v)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", field.conf, err)
+				}
+			}
+			fmt.Fprintf(&b, "%s=%s\n", field.uapi, v)
 		}
 	}
 
@@ -205,6 +231,9 @@ func parseConf(text string) (*shimConf, error) {
 	}
 	fmt.Fprintf(&b, "endpoint=%s\n", ep)
 	if ka := peer["persistentkeepalive"]; ka != "" {
+		if strings.EqualFold(ka, "off") {
+			ka = "0"
+		}
 		fmt.Fprintf(&b, "persistent_keepalive_interval=%s\n", ka)
 	}
 	allowed := splitList(peer["allowedips"])
@@ -241,6 +270,27 @@ func b64ToHex(s string) (string, error) {
 		return "", fmt.Errorf("bad key length %d", len(raw))
 	}
 	return hex.EncodeToString(raw), nil
+}
+
+func awgKeyToHex(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if len(s) == 64 {
+		if raw, err := hex.DecodeString(s); err == nil && len(raw) == 32 {
+			return strings.ToLower(s), nil
+		}
+	}
+	return b64ToHex(s)
+}
+
+func awgBool(s string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on", "true", "1":
+		return "true", nil
+	case "off", "false", "0":
+		return "false", nil
+	default:
+		return "", fmt.Errorf("expected on/off, true/false or 1/0")
+	}
 }
 
 // UAPI wants ip:port; the conf may carry a hostname — resolve it with the

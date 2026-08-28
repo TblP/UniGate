@@ -2,7 +2,7 @@ module unigate/awg-shim
 
 go 1.26.3
 
-require github.com/amnezia-vpn/amneziawg-go v0.2.19
+require github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260814
 
 require (
 	github.com/google/btree v1.1.3 // indirect

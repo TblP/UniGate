@@ -15,10 +15,10 @@ set -euo pipefail
 
 GO_REPO="https://github.com/amnezia-vpn/amneziawg-go"
 TOOLS_REPO="https://github.com/amnezia-vpn/amneziawg-tools"
-# Фиксируем совместимые релизы: master у обоих проектов меняется и уже ломал
-# формат AWG 1.5/2.0. v0.2.19 поддерживает S3/S4 и I1-I5 из vpn:// Amnezia.
-GO_VERSION="v0.2.19"
-TOOLS_VERSION="v1.0.20260223"
+# Фиксируем совместимые релизы с поддержкой AmneziaWG 3.1. Ветка master у
+# обоих проектов меняется, поэтому воспроизводимая сборка использует теги.
+GO_VERSION="v3.1.20260814"
+TOOLS_VERSION="v3.1.20260812"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Этот скрипт только для macOS (Windows-движок — в fetch-singbox.ps1)." >&2
@@ -74,7 +74,10 @@ if [ -f "$BIN_DIR/awg" ] && [ -f "$BIN_DIR/awg-quick" ]; then
 else
   echo "Собираю amneziawg-tools (awg)…"
   git clone --depth 1 --branch "$TOOLS_VERSION" "$TOOLS_REPO" "$tmp/awg-tools"
-  git -C "$tmp/awg-tools" apply --recount "$ROOT/scripts/awg-quick-bash3.patch"
+  # Upstream 3.1 slightly reformatted the DNS block; the semantic context is
+  # unchanged, so ignore whitespace while applying our Bash 3/runtime fixes.
+  git -C "$tmp/awg-tools" apply --recount --ignore-space-change --ignore-whitespace \
+    "$ROOT/scripts/awg-quick-bash3.patch"
   # Цель сборки называется `wg`, а `make install` штатно переименовывает её в
   # `awg` и устанавливает правильный darwin-вариант как `awg-quick`.
   install_root="$tmp/awg-install"

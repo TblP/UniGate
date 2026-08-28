@@ -917,6 +917,41 @@ mod tests {
     }
 
     #[test]
+    fn amnezia_vpn_awg31_preserves_new_engine_fields() {
+        let conf = "[Interface]\nAddress = 10.8.1.7/32\nPrivateKey = KEY\nH1 = 100-200\nHeaderProtectionKey = HEADER_KEY\nContentPaddingAddition = 16-64\nRekeyAfterTime = 120-180\nRekeyTimeout = 3-5\nRejectAfterTime = 180-240\nKeepaliveTimeout = 10-15\nMaxHandshakeAttempts = 5-8\nRandomTrailers = on\nDisableCookies = off\n[Peer]\nPublicKey = PUB\nEndpoint = 192.0.2.1:51820\nAllowedIPs = 0.0.0.0/0, ::/0\n";
+        let last_config = serde_json::json!({ "config": conf, "mtu": 1376 }).to_string();
+        let amnezia = serde_json::json!({
+            "defaultContainer": "amnezia-awg3",
+            "description": "AWG 3.1",
+            "hostName": "192.0.2.1",
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": { "last_config": last_config, "port": 51820, "protocol_version": 3 }
+            }]
+        })
+        .to_string();
+
+        let (_, outbound) = parse(&pack_amnezia(&amnezia)).unwrap();
+        let Outbound::AmneziaWg { config, server, port } = outbound else {
+            panic!("expected amneziawg");
+        };
+        assert_eq!((server.as_str(), port), ("192.0.2.1", 51820));
+        for field in [
+            "HeaderProtectionKey = HEADER_KEY",
+            "ContentPaddingAddition = 16-64",
+            "RekeyAfterTime = 120-180",
+            "RekeyTimeout = 3-5",
+            "RejectAfterTime = 180-240",
+            "KeepaliveTimeout = 10-15",
+            "MaxHandshakeAttempts = 5-8",
+            "RandomTrailers = on",
+            "DisableCookies = off",
+        ] {
+            assert!(config.contains(field), "missing {field}");
+        }
+    }
+
+    #[test]
     fn amnezia_vpn_xray_vless() {
         use std::io::Write;
         // встроенный Xray-конфиг (как в контейнере amnezia-xray)

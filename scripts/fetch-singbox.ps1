@@ -18,33 +18,39 @@ $root    = Split-Path -Parent $PSScriptRoot
 $binDir  = Join-Path $root "src-tauri\binaries"
 $dest    = Join-Path $binDir "sing-box-$Triple.exe"
 
+$downloadSingBox = $true
 if (Test-Path $dest) {
   $existing = & $dest version 2>$null | Select-Object -First 1
   Write-Host "sing-box уже на месте: $existing"
-  if ($existing -match [regex]::Escape($Version)) { return }
-  Write-Host "Версия отличается от $Version — перекачиваю."
+  if ($existing -match [regex]::Escape($Version)) {
+    $downloadSingBox = $false
+  } else {
+    Write-Host "Версия отличается от $Version — перекачиваю."
+  }
 }
 
-$asset = "sing-box-$Version-windows-amd64.zip"
-$url   = "https://github.com/SagerNet/sing-box/releases/download/v$Version/$asset"
-$tmp   = Join-Path $env:TEMP $asset
-$ext   = Join-Path $env:TEMP "singbox_ext_$Version"
+if ($downloadSingBox) {
+  $asset = "sing-box-$Version-windows-amd64.zip"
+  $url   = "https://github.com/SagerNet/sing-box/releases/download/v$Version/$asset"
+  $tmp   = Join-Path $env:TEMP $asset
+  $ext   = Join-Path $env:TEMP "singbox_ext_$Version"
 
-Write-Host "Скачиваю $url"
-Invoke-WebRequest -Uri $url -OutFile $tmp -Headers @{ "User-Agent" = "UniGate" }
+  Write-Host "Скачиваю $url"
+  Invoke-WebRequest -Uri $url -OutFile $tmp -Headers @{ "User-Agent" = "UniGate" }
 
-if (Test-Path $ext) { Remove-Item $ext -Recurse -Force }
-Expand-Archive -Path $tmp -DestinationPath $ext -Force
+  if (Test-Path $ext) { Remove-Item $ext -Recurse -Force }
+  Expand-Archive -Path $tmp -DestinationPath $ext -Force
 
-$exe = Get-ChildItem -Path $ext -Recurse -Filter "sing-box.exe" | Select-Object -First 1
-if (-not $exe) { throw "sing-box.exe не найден в архиве" }
+  $exe = Get-ChildItem -Path $ext -Recurse -Filter "sing-box.exe" | Select-Object -First 1
+  if (-not $exe) { throw "sing-box.exe не найден в архиве" }
 
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-Copy-Item $exe.FullName $dest -Force
-Remove-Item $tmp, $ext -Recurse -Force
+  New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+  Copy-Item $exe.FullName $dest -Force
+  Remove-Item $tmp, $ext -Recurse -Force
 
-Write-Host "Готово: $dest"
-& $dest version | Select-Object -First 1
+  Write-Host "Готово: $dest"
+  & $dest version | Select-Object -First 1
+}
 
 # --- wintun.dll (нужен sing-box для TUN-режима на Windows) ---
 $wintunVersion = "0.14.1"
@@ -66,10 +72,12 @@ if (Test-Path $wintunDest) {
 }
 
 # --- amneziawg.exe + awg.exe (движок AmneziaWG, Phase 7c) ---
-$awgVersion = "2.0.1"
+$awgVersion = "3.1.0"
 $awgDest = Join-Path $binDir "amneziawg-x86_64-pc-windows-msvc.exe"
-if (Test-Path $awgDest) {
-  Write-Host "amneziawg.exe уже на месте"
+$awgStamp = Join-Path $binDir ".amneziawg-windows-version"
+$installedAwgVersion = if (Test-Path $awgStamp) { (Get-Content -LiteralPath $awgStamp -Raw).Trim() } else { "" }
+if ((Test-Path $awgDest) -and $installedAwgVersion -eq $awgVersion) {
+  Write-Host "amneziawg.exe $awgVersion уже на месте"
 } else {
   $awgMsi = Join-Path $env:TEMP "amneziawg.msi"
   $awgExt = Join-Path $env:TEMP "amneziawg_ext"
@@ -84,6 +92,7 @@ if (Test-Path $awgDest) {
   if (-not $awgExe) { throw "amneziawg.exe не найден в MSI" }
   Copy-Item $awgExe.FullName $awgDest -Force
   if ($awgCli) { Copy-Item $awgCli.FullName (Join-Path $binDir "awg.exe") -Force }
+  Set-Content -LiteralPath $awgStamp -Value $awgVersion -NoNewline
   Remove-Item $awgMsi, $awgExt -Recurse -Force
   Write-Host "Готово: $awgDest"
 }

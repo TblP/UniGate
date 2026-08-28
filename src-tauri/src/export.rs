@@ -10,9 +10,22 @@ use std::io::Write;
 
 // кодируем всё, кроме безопасных символов
 const ESCAPE: &AsciiSet = &CONTROLS
-    .add(b' ').add(b'"').add(b'#').add(b'<').add(b'>').add(b'?')
-    .add(b'`').add(b'{').add(b'}').add(b'/').add(b':').add(b'@')
-    .add(b'&').add(b'=').add(b'+').add(b'%');
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}')
+    .add(b'/')
+    .add(b':')
+    .add(b'@')
+    .add(b'&')
+    .add(b'=')
+    .add(b'+')
+    .add(b'%');
 
 fn enc(s: &str) -> String {
     utf8_percent_encode(s, ESCAPE).to_string()
@@ -90,37 +103,64 @@ fn transport_query(transport: &Option<Transport>) -> Vec<(&'static str, String)>
 /// Упаковывает AmneziaWG-конфиг в совместимый с нашим импортом контейнер
 /// `vpn://base64url(qCompress(JSON))`. В `.conf` уже находятся endpoint,
 /// ключи и все параметры обфускации, поэтому ссылка полностью обратима.
+fn amnezia_protocol_version(config: &str) -> u8 {
+    const V3_KEYS: &[&str] = &[
+        "HeaderProtectionKey",
+        "ContentPaddingAddition",
+        "RekeyAfterTime",
+        "RekeyTimeout",
+        "RejectAfterTime",
+        "KeepaliveTimeout",
+        "MaxHandshakeAttempts",
+        "RandomTrailers",
+        "DisableCookies",
+    ];
+
+    let has_v3_key = config.lines().any(|line| {
+        let Some((key, _)) = line.split_once('=') else {
+            return false;
+        };
+        V3_KEYS
+            .iter()
+            .any(|candidate| key.trim().eq_ignore_ascii_case(candidate))
+    });
+
+    if has_v3_key {
+        3
+    } else {
+        2
+    }
+}
+
 fn amnezia_link(name: &str, config: &str, server: &str, port: u16) -> String {
+    let protocol_version = amnezia_protocol_version(config);
+    let container_name = format!("amnezia-awg{protocol_version}");
     let last_config = serde_json::json!({ "config": config }).to_string();
     let container = serde_json::json!({
-        "defaultContainer": "amnezia-awg2",
+        "defaultContainer": container_name,
         "description": name,
         "hostName": server,
         "dns1": "1.1.1.1",
         "dns2": "1.0.0.1",
         "containers": [{
-            "container": "amnezia-awg2",
+            "container": container_name,
             "awg": {
                 "last_config": last_config,
                 "port": port.to_string(),
-                "protocol_version": 2
+                "protocol_version": protocol_version
             }
         }]
     })
     .to_string();
 
-    let mut encoder =
-        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
         .write_all(container.as_bytes())
         .expect("zlib write to Vec cannot fail");
     let compressed = encoder.finish().expect("zlib finish to Vec cannot fail");
     let mut packed = (container.len() as u32).to_be_bytes().to_vec();
     packed.extend_from_slice(&compressed);
-    format!(
-        "vpn://{}",
-        general_purpose::URL_SAFE_NO_PAD.encode(packed)
-    )
+    format!("vpn://{}", general_purpose::URL_SAFE_NO_PAD.encode(packed))
 }
 
 /// JSON-представление профиля — sing-box outbound-объект (для вставки в конфиг
@@ -137,16 +177,39 @@ pub fn to_json(outbound: &Outbound) -> String {
 /// Строит share-ссылку/представление профиля.
 pub fn to_share(name: &str, outbound: &Outbound) -> String {
     match outbound {
-        Outbound::Shadowsocks { server, port, method, password } => {
+        Outbound::Shadowsocks {
+            server,
+            port,
+            method,
+            password,
+        } => {
             let userinfo = general_purpose::STANDARD_NO_PAD.encode(format!("{method}:{password}"));
             format!("ss://{userinfo}@{server}:{port}#{}", enc(name))
         }
-        Outbound::Trojan { server, port, password, tls, transport } => {
+        Outbound::Trojan {
+            server,
+            port,
+            password,
+            tls,
+            transport,
+        } => {
             let mut q = tls_query(tls, "tls");
             q.extend(transport_query(transport));
-            format!("trojan://{}@{server}:{port}{}#{}", enc(password), query(&q), enc(name))
+            format!(
+                "trojan://{}@{server}:{port}{}#{}",
+                enc(password),
+                query(&q),
+                enc(name)
+            )
         }
-        Outbound::Vless { server, port, uuid, flow, tls, transport } => {
+        Outbound::Vless {
+            server,
+            port,
+            uuid,
+            flow,
+            tls,
+            transport,
+        } => {
             let mut q: Vec<(&str, String)> = vec![("encryption", "none".into())];
             if let Some(f) = flow {
                 q.push(("flow", f.clone()));
@@ -155,14 +218,35 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
             q.extend(transport_query(transport));
             format!("vless://{uuid}@{server}:{port}{}#{}", query(&q), enc(name))
         }
-        Outbound::Tuic { server, port, uuid, password, congestion_control, tls } => {
+        Outbound::Tuic {
+            server,
+            port,
+            uuid,
+            password,
+            congestion_control,
+            tls,
+        } => {
             let mut q = tls_query(tls, "tls");
             if let Some(cc) = congestion_control {
                 q.push(("congestion_control", cc.clone()));
             }
-            format!("tuic://{uuid}:{}@{server}:{port}{}#{}", enc(password), query(&q), enc(name))
+            format!(
+                "tuic://{uuid}:{}@{server}:{port}{}#{}",
+                enc(password),
+                query(&q),
+                enc(name)
+            )
         }
-        Outbound::Hysteria2 { server, port, password, sni, insecure, obfs_password, up_mbps, down_mbps } => {
+        Outbound::Hysteria2 {
+            server,
+            port,
+            password,
+            sni,
+            insecure,
+            obfs_password,
+            up_mbps,
+            down_mbps,
+        } => {
             let mut q: Vec<(&str, String)> = Vec::new();
             if let Some(s) = sni {
                 q.push(("sni", s.clone()));
@@ -180,17 +264,34 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
             if let Some(down) = down_mbps {
                 q.push(("down", down.to_string()));
             }
-            format!("hysteria2://{}@{server}:{port}{}#{}", enc(password), query(&q), enc(name))
+            format!(
+                "hysteria2://{}@{server}:{port}{}#{}",
+                enc(password),
+                query(&q),
+                enc(name)
+            )
         }
-        Outbound::Vmess { server, port, uuid, alter_id, security, tls, transport } => {
+        Outbound::Vmess {
+            server,
+            port,
+            uuid,
+            alter_id,
+            security,
+            tls,
+            transport,
+        } => {
             let (net, host, path) = match transport {
                 None => ("tcp", String::new(), String::new()),
-                Some(Transport::Ws { path, host }) => {
-                    ("ws", host.clone().unwrap_or_default(), path.clone().unwrap_or_default())
-                }
-                Some(Transport::Grpc { service_name }) => {
-                    ("grpc", String::new(), service_name.clone().unwrap_or_default())
-                }
+                Some(Transport::Ws { path, host }) => (
+                    "ws",
+                    host.clone().unwrap_or_default(),
+                    path.clone().unwrap_or_default(),
+                ),
+                Some(Transport::Grpc { service_name }) => (
+                    "grpc",
+                    String::new(),
+                    service_name.clone().unwrap_or_default(),
+                ),
             };
             let json = serde_json::json!({
                 "v": "2",
@@ -206,7 +307,10 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
                 "tls": if tls.enabled { "tls" } else { "" },
                 "sni": tls.sni.clone().unwrap_or_default()
             });
-            format!("vmess://{}", general_purpose::STANDARD_NO_PAD.encode(json.to_string()))
+            format!(
+                "vmess://{}",
+                general_purpose::STANDARD_NO_PAD.encode(json.to_string())
+            )
         }
         // socks/http без общепринятой share-ссылки → JSON sing-box outbound
         Outbound::Socks { .. } | Outbound::Http { .. } => {
@@ -225,6 +329,17 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
 mod tests {
     use super::*;
     use crate::import;
+    use std::io::Read;
+
+    fn unpack_amnezia_link(link: &str) -> serde_json::Value {
+        let packed = general_purpose::URL_SAFE_NO_PAD
+            .decode(link.strip_prefix("vpn://").unwrap())
+            .unwrap();
+        let mut decoder = flate2::read::ZlibDecoder::new(&packed[4..]);
+        let mut json = String::new();
+        decoder.read_to_string(&mut json).unwrap();
+        serde_json::from_str(&json).unwrap()
+    }
 
     fn roundtrip(name: &str, ob: Outbound) {
         let link = to_share(name, &ob);
@@ -293,7 +408,11 @@ mod tests {
                 server: "ex.com".into(),
                 port: 443,
                 password: "secret".into(),
-                tls: TlsOpts { enabled: true, sni: Some("ex.com".into()), ..Default::default() },
+                tls: TlsOpts {
+                    enabled: true,
+                    sni: Some("ex.com".into()),
+                    ..Default::default()
+                },
                 transport: None,
             },
         );
@@ -305,7 +424,11 @@ mod tests {
                 uuid: "uid".into(),
                 password: "pw".into(),
                 congestion_control: Some("bbr".into()),
-                tls: TlsOpts { enabled: true, sni: Some("ex.com".into()), ..Default::default() },
+                tls: TlsOpts {
+                    enabled: true,
+                    sni: Some("ex.com".into()),
+                    ..Default::default()
+                },
             },
         );
     }
@@ -320,7 +443,11 @@ mod tests {
                 uuid: "uid".into(),
                 alter_id: 0,
                 security: Some("auto".into()),
-                tls: TlsOpts { enabled: true, sni: Some("sni.com".into()), ..Default::default() },
+                tls: TlsOpts {
+                    enabled: true,
+                    sni: Some("sni.com".into()),
+                    ..Default::default()
+                },
                 transport: Some(Transport::Ws {
                     path: Some("/p".into()),
                     host: Some("host.com".into()),
@@ -332,13 +459,26 @@ mod tests {
     #[test]
     fn roundtrip_amneziawg_vpn_link() {
         let outbound = Outbound::AmneziaWg {
-            config: "[Interface]\nAddress = 10.8.1.7/32\nPrivateKey = KEY\nJc = 5\nI1 = <b 0x01>\nI2 =\n[Peer]\nPublicKey = PUB\nEndpoint = 1.2.3.4:34196\nAllowedIPs = 0.0.0.0/0, ::/0\n".into(),
+            config: "[Interface]\nAddress = 10.8.1.7/32\nPrivateKey = KEY\nJc = 5\nI1 = <b 0x01>\nI2 =\nHeaderProtectionKey = HEADER_KEY\nContentPaddingAddition = 16-64\nRandomTrailers = on\n[Peer]\nPublicKey = PUB\nEndpoint = 1.2.3.4:34196\nAllowedIPs = 0.0.0.0/0, ::/0\n".into(),
             server: "1.2.3.4".into(),
             port: 34196,
         };
 
         let link = to_share("FR-AWG", &outbound);
         assert!(link.starts_with("vpn://"));
+        let container = unpack_amnezia_link(&link);
+        assert_eq!(container["defaultContainer"], "amnezia-awg3");
+        assert_eq!(container["containers"][0]["container"], "amnezia-awg3");
+        assert_eq!(container["containers"][0]["awg"]["protocol_version"], 3);
         roundtrip("FR-AWG", outbound);
+    }
+
+    #[test]
+    fn legacy_amneziawg_export_stays_v2() {
+        let config = "[Interface]\nPrivateKey = KEY\nJc = 5\nS3 = 19\n[Peer]\nPublicKey = PUB\nEndpoint = 1.2.3.4:34196\n";
+        let container = unpack_amnezia_link(&amnezia_link("AWG", config, "1.2.3.4", 34196));
+
+        assert_eq!(container["defaultContainer"], "amnezia-awg2");
+        assert_eq!(container["containers"][0]["awg"]["protocol_version"], 2);
     }
 }
