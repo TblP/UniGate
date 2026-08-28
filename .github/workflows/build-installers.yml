@@ -67,6 +67,11 @@ jobs:
 
       - name: Build application
         run: npm run tauri build
+        env:
+          # Windows updater artifacts are signed independently from the
+          # optional Authenticode publisher signature.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'Windows' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
 
       # Инсталлеры Windows: MSI (WiX) + NSIS-setup.exe
       - name: Upload Windows installers
@@ -78,6 +83,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
 
       # Инсталлер macOS: .dmg (неподписанный — Gatekeeper потребует
       # «ПКМ → Открыть» при первом запуске; подпись/нотаризация — отдельно)
@@ -159,6 +165,26 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts # каждая сборка попадёт в свой подкаталог
+
+      - name: Create Windows updater manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          installer="$(find artifacts -type f -name '*-setup.exe' -print -quit)"
+          signature_file="${installer}.sig"
+          test -n "$installer"
+          test -f "$signature_file"
+          asset_name="$(basename "$installer")"
+          asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${asset_name}"
+          manifest="$(dirname "$installer")/latest.json"
+          jq -n \
+            --arg version "$version" \
+            --rawfile notes RELEASE_NOTES.md \
+            --arg url "$asset_url" \
+            --rawfile signature "$signature_file" \
+            '{version: $version, notes: $notes, platforms: {"windows-x86_64": {url: $url, signature: $signature}}}' \
+            > "$manifest"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

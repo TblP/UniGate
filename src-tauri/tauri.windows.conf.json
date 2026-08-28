@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
+    "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/sing-box",
       "binaries/amneziawg",
@@ -9,6 +10,17 @@
     "resources": {
       "binaries/wintun.dll": "",
       "binaries/geoip-ru.srs": ""
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI1NDVFMDc0MzM4NTYyNzIKUldSeVlvVXpkT0JGdGZDUHRLOVRhRWRlcWNkdHR2OUZjM1dTUzFYYmVFSlN2WUl5S2VjVW5LdmcK",
+      "endpoints": [
+        "https://github.com/TblP/UniGate/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

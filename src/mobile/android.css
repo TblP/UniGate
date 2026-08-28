@@ -1039,6 +1039,14 @@
   font-size: 10px;
 }
 
+.mobile-drawer footer .update-button {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
 .mobile-modal-backdrop {
   position: fixed;
   inset: 0;

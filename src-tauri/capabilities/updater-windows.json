@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater-windows",
+  "description": "Allow the main window to check and install signed updates on Windows",
+  "windows": ["main"],
+  "platforms": ["windows"],
+  "permissions": ["updater:default"]
+}

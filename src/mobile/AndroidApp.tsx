@@ -14,6 +14,7 @@ import type {
 import { useAppStore } from "../store/useAppStore";
 import { ImportDialog } from "../features/profiles/ImportDialog";
 import { ProfileForm } from "../features/profiles/ProfileForm";
+import { UpdateButton } from "../components/UpdateButton";
 
 type MobileTab = "connection" | "routing" | "settings";
 type Editor = "create" | "import" | null;
@@ -872,6 +873,7 @@ export function AndroidApp() {
           ))}
         </nav>
         <footer>
+          <UpdateButton />
           <span>UniGate {__APP_VERSION__}</span>
           <span>Android · ARM64</span>
         </footer>

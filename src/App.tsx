@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "./store/useAppStore";
 import { TitleBar } from "./components/TitleBar";
+import { UpdateButton } from "./components/UpdateButton";
 import { ConnectionPanel } from "./features/connection/ConnectionPanel";
 import { SubscriptionsPanel } from "./features/subscriptions/SubscriptionsPanel";
 import { RoutingPanel } from "./features/routing/RoutingPanel";
@@ -96,6 +97,7 @@ function App() {
         </nav>
 
         <div className="sidebar-foot">
+          <UpdateButton />
           {coreError ? (
             <span className="core-badge err" title={coreError}>
               ❌ ядро недоступно
