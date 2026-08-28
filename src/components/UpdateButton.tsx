@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { isWindows } from "../lib/platform";
+import { ipc } from "../lib/ipc";
 
 const LATEST_RELEASE_API =
   "https://api.github.com/repos/TblP/UniGate/releases/latest";
@@ -14,6 +15,7 @@ type AvailableUpdate = {
 type UpdateState =
   | { phase: "idle" }
   | { phase: "downloading"; progress: number | null }
+  | { phase: "stopping" }
   | { phase: "installing" }
   | { phase: "error"; message: string };
 
@@ -85,7 +87,7 @@ export function UpdateButton() {
 
       let downloaded = 0;
       let total: number | undefined;
-      await pending.downloadAndInstall((event) => {
+      await pending.download((event) => {
         if (event.event === "Started") {
           total = event.data.contentLength;
           setState({ phase: "downloading", progress: total ? 0 : null });
@@ -95,10 +97,14 @@ export function UpdateButton() {
             phase: "downloading",
             progress: total ? Math.min(100, Math.round((downloaded / total) * 100)) : null,
           });
-        } else {
-          setState({ phase: "installing" });
+        } else if (event.event === "Finished") {
+          setState({ phase: "downloading", progress: 100 });
         }
       });
+      setState({ phase: "stopping" });
+      await ipc.disconnect();
+      setState({ phase: "installing" });
+      await pending.install();
     } catch (error) {
       setState({
         phase: "error",
@@ -110,13 +116,18 @@ export function UpdateButton() {
   let label = isWindows ? `Обновить до v${update.version}` : `Скачать v${update.version}`;
   if (state.phase === "downloading") {
     label = state.progress === null ? "Загрузка…" : `Загрузка ${state.progress}%`;
+  } else if (state.phase === "stopping") {
+    label = "Остановка VPN…";
   } else if (state.phase === "installing") {
     label = "Запуск установки…";
   } else if (state.phase === "error") {
     label = "Повторить обновление";
   }
 
-  const busy = state.phase === "downloading" || state.phase === "installing";
+  const busy =
+    state.phase === "downloading" ||
+    state.phase === "stopping" ||
+    state.phase === "installing";
   return (
     <button
       type="button"

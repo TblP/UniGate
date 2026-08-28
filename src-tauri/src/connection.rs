@@ -61,6 +61,43 @@ pub struct ConnState {
 
 pub struct Connection(pub Mutex<ConnState>);
 
+#[cfg(target_os = "windows")]
+fn terminate_windows_process(pid: u32, name: &str) -> Result<(), String> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
+        System::Threading::{
+            OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+            PROCESS_TERMINATE,
+        },
+    };
+
+    const WAIT_TIMEOUT_MS: u32 = 5_000;
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, pid) };
+    if handle.is_null() {
+        let code = unsafe { GetLastError() };
+        // Процесс мог успеть завершиться между чтением PID и OpenProcess.
+        return if code == ERROR_INVALID_PARAMETER {
+            Ok(())
+        } else {
+            Err(format!("не удалось открыть процесс {name} (код {code})"))
+        };
+    }
+    if unsafe { WaitForSingleObject(handle, 0) } != WAIT_OBJECT_0
+        && unsafe { TerminateProcess(handle, 1) } == 0
+    {
+        let code = unsafe { GetLastError() };
+        unsafe { CloseHandle(handle) };
+        return Err(format!("не удалось завершить {name} (код {code})"));
+    }
+    let result = unsafe { WaitForSingleObject(handle, WAIT_TIMEOUT_MS) };
+    unsafe { CloseHandle(handle) };
+    if result == WAIT_OBJECT_0 {
+        Ok(())
+    } else {
+        Err(format!("{name} не завершился за 5 секунд"))
+    }
+}
+
 impl Connection {
     pub fn new() -> Self {
         Self(Mutex::new(ConnState::default()))
@@ -145,13 +182,19 @@ pub fn cleanup(app: &AppHandle) {
     };
 
     if let Some(child) = child {
+        #[cfg(target_os = "windows")]
+        let _ = terminate_windows_process(child.pid(), "sing-box");
+        #[cfg(not(target_os = "windows"))]
         let _ = child.kill();
     }
     if let Some(mut shim) = shim {
         let _ = shim.kill();
+        let _ = shim.wait();
     }
     if let Some(handle) = awg {
-        awg_tunnel_down(app, &handle);
+        if let Err(e) = awg_tunnel_down(app, &handle) {
+            eprintln!("не удалось снять AmneziaWG-тоннель: {e}");
+        }
     }
     // macOS TUN: удаляем сигнальный файл — root-watcher (переживёт выход GUI) убьёт sing-box
     #[cfg(target_os = "macos")]
@@ -1389,20 +1432,16 @@ fn spawn_awg_quick_root(app: &AppHandle, conf: &str) -> Result<(), String> {
 
 /// Снятие AmneziaWG-тоннеля по сохранённому «handle» (Windows: имя сервиса;
 /// macOS: путь `.conf`). Best-effort — ошибку только логируем.
-fn awg_tunnel_down(app: &AppHandle, handle: &str) {
+fn awg_tunnel_down(app: &AppHandle, handle: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let _ = app;
-        if let Err(e) = run_awg(&["/uninstalltunnelservice", handle]) {
-            eprintln!("не удалось снять AmneziaWG-тоннель: {e}");
-        }
+        run_awg(&["/uninstalltunnelservice", handle])?;
     }
     #[cfg(target_os = "macos")]
     {
         if elevation::is_elevated() {
-            if let Err(e) = run_awg_quick("down", handle) {
-                eprintln!("не удалось снять AmneziaWG-тоннель: {e}");
-            }
+            run_awg_quick("down", handle)?;
         } else {
             // тоннель поднимал root-watcher — снимаем удалением сигнального файла
             if let Ok(sent) = storage::path(app, AWG_SENTINEL) {
@@ -1414,26 +1453,96 @@ fn awg_tunnel_down(app: &AppHandle, handle: &str) {
     {
         let _ = (app, handle);
     }
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
-    let (child, awg, shim) = {
+    {
         let conn = app.state::<Connection>();
         let mut guard = conn.0.lock().map_err(|e| e.to_string())?;
         guard.state = ConnectionState::Disconnecting;
-        (guard.child.take(), guard.awg_tunnel.take(), guard.shim.take())
-    };
+    }
     let _ = app.emit(EVENT, ConnectionState::Disconnecting);
 
-    if let Some(child) = child {
-        let _ = child.kill();
+    let mut stop_errors = Vec::new();
+
+    // Windows updater немедленно завершает GUI после запуска установщика.
+    // Поэтому сначала синхронно останавливаем и проверяем все принадлежащие
+    // UniGate процессы. При ошибке оставляем handle в состоянии: повторное
+    // нажатие снова попробует остановить тот же процесс и не пропустит установку.
+    #[cfg(target_os = "windows")]
+    {
+        let (child_pid, shim_pid, awg) = {
+            let conn = app.state::<Connection>();
+            let guard = conn.0.lock().map_err(|e| e.to_string())?;
+            (
+                guard.child.as_ref().map(CommandChild::pid),
+                guard.shim.as_ref().map(std::process::Child::id),
+                guard.awg_tunnel.clone(),
+            )
+        };
+
+        if let Some(pid) = child_pid {
+            match terminate_windows_process(pid, "sing-box") {
+                Ok(()) => {
+                    let conn = app.state::<Connection>();
+                    if let Ok(mut guard) = conn.0.lock() {
+                        guard.child.take();
+                    };
+                }
+                Err(e) => stop_errors.push(e),
+            }
+        }
+        if let Some(pid) = shim_pid {
+            match terminate_windows_process(pid, "AWG-движок") {
+                Ok(()) => {
+                    let conn = app.state::<Connection>();
+                    if let Ok(mut guard) = conn.0.lock() {
+                        if let Some(mut shim) = guard.shim.take() {
+                            let _ = shim.wait();
+                        }
+                    };
+                }
+                Err(e) => stop_errors.push(e),
+            }
+        }
+        if let Some(handle) = awg {
+            match awg_tunnel_down(&app, &handle) {
+                Ok(()) => {
+                    let conn = app.state::<Connection>();
+                    if let Ok(mut guard) = conn.0.lock() {
+                        if guard.awg_tunnel.as_deref() == Some(handle.as_str()) {
+                            guard.awg_tunnel.take();
+                        }
+                    };
+                }
+                Err(e) => stop_errors.push(format!("не удалось остановить AmneziaWG: {e}")),
+            }
+        }
     }
-    if let Some(mut shim) = shim {
-        let _ = shim.kill();
-    }
-    if let Some(handle) = awg {
-        awg_tunnel_down(&app, &handle);
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let (child, awg, shim) = {
+            let conn = app.state::<Connection>();
+            let mut guard = conn.0.lock().map_err(|e| e.to_string())?;
+            (guard.child.take(), guard.awg_tunnel.take(), guard.shim.take())
+        };
+        if let Some(child) = child {
+            let _ = child.kill();
+        }
+        if let Some(mut shim) = shim {
+            let _ = shim.kill();
+            if let Err(e) = shim.wait() {
+                stop_errors.push(format!("не удалось дождаться остановки AWG-движка: {e}"));
+            }
+        }
+        if let Some(handle) = awg {
+            if let Err(e) = awg_tunnel_down(&app, &handle) {
+                stop_errors.push(format!("не удалось остановить AmneziaWG: {e}"));
+            }
+        }
     }
     // macOS TUN: удаляем сигнальный файл — root-watcher сам убьёт sing-box (без
     // пароля). ВАЖНО дождаться реальной смерти ядра: оно держит порт Clash API
@@ -1463,8 +1572,19 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
         eprintln!("не удалось снять системный прокси: {e}");
     }
 
-    set_state(&app, ConnectionState::Disconnected);
-    Ok(ConnectionState::Disconnected)
+    if stop_errors.is_empty() {
+        set_state(&app, ConnectionState::Disconnected);
+        Ok(ConnectionState::Disconnected)
+    } else {
+        let message = stop_errors.join("; ");
+        set_state(
+            &app,
+            ConnectionState::Error {
+                message: message.clone(),
+            },
+        );
+        Err(message)
+    }
 }
 
 #[cfg(test)]

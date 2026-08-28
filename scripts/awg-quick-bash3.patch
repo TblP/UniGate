@@ -118,7 +118,8 @@ diff --git a/src/wg-quick/darwin.bash b/src/wg-quick/darwin.bash
 @@ -293,8 +328,9 @@ set_endpoint_direct_route() {
  
  set_dns() {
- 	collect_new_service_dns
+-	collect_new_service_dns
++	collect_new_service_dns || { echo "[!] Could not read one or more network services; keeping existing DNS" >&2; return 0; }
 -	local service response
 -	for service in "${!SERVICE_DNS[@]}"; do
 +	local service response i
@@ -156,3 +157,8 @@ diff --git a/src/wg-quick/darwin.bash b/src/wg-quick/darwin.bash
  	[[ ${#DNS[@]} -gt 0 ]] && trap set_dns ALRM
  	# TODO: this should also check to see if the endpoint actually changes
  	# in response to incoming packets, and then call set_endpoint_direct_route
+@@ -439 +477,3 @@ cmd_up() {
+-	[[ ${#DNS[@]} -gt 0 ]] && set_dns
++	if [[ ${#DNS[@]} -gt 0 ]]; then
++		set_dns || echo "[!] Could not configure system DNS; tunnel remains active" >&2
++	fi
