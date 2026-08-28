@@ -19,11 +19,12 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
+import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.unigate.app.awgshim.Awgshim
-import com.unigate.app.awgshim.Protector
 import com.unigate.app.MainActivity
 import com.unigate.app.R
+import io.nekohasekai.awgshim.Awgshim
+import io.nekohasekai.awgshim.Protector
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
 import io.nekohasekai.libbox.ConnectionOwner
@@ -164,15 +165,31 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
                 VpnQuickControl.setState(this, VpnQuickControl.State.ON)
                 showForeground("VPN подключён")
             }.onFailure {
-                finishStart(startToken, it.message ?: "Неизвестная ошибка VPN")
+                val error = it.diagnosticMessage()
+                Log.e("UniGateVpnService", "VPN startup failed", it)
+                finishStart(startToken, error)
                 liveState = VpnQuickControl.State.OFF
                 VpnQuickControl.setShouldReconnect(this, false)
                 VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
-                showForeground("Ошибка VPN: ${it.message ?: "неизвестная ошибка"}")
+                showForeground("Ошибка VPN: $error")
                 stopVpn()
             }
         }.start()
         return START_STICKY
+    }
+
+    private fun Throwable.diagnosticMessage(): String {
+        var current = this
+        var depth = 0
+        while (depth < 8) {
+            val next = current.cause ?: break
+            if (next === current) break
+            current = next
+            depth += 1
+        }
+        val message = current.message?.takeIf { it.isNotBlank() }
+        return if (message == null) current.javaClass.simpleName
+        else "${current.javaClass.simpleName}: $message"
     }
 
     @Synchronized

@@ -1,15 +1,16 @@
-# UniGate 1.1.4 — AmneziaWG 3.1 на Android
+# UniGate 1.1.5 — исправление AmneziaWG на Android
 
-В Android-версию добавлен AmneziaWG 1.5/3.1 через общий userspace `awg-shim`.
+Хотфикс устраняет ошибку запуска `com.unigate.app.awgshim.Awgshim` из версии 1.1.4.
 
 ## Что нового
 
 - Профили AmneziaWG теперь импортируются из `vpn://`, отображаются и подключаются на Android.
-- `awg-shim` встроен в APK как ARM64 gomobile-библиотека и использует `amneziawg-go/v3 v3.1.20260814`.
+- `awg-shim` и sing-box теперь собираются в одну ARM64 gomobile-библиотеку с единым Go-runtime. Это устраняет конфликт инициализации между двумя AAR.
+- `awg-shim` использует `amneziawg-go/v3 v3.1.20260814`.
 - sing-box остаётся владельцем Android VPN, поэтому для AmneziaWG работают RU/LAN-обход, split-tunneling по приложениям и живая статистика.
 - Транспортные UDP-сокеты AmneziaWG защищаются через `VpnService.protect(fd)`, чтобы исключить петлю через собственный TUN.
 - Быстрое подключение, Always-on, плитка и виджеты восстанавливают сохранённый AWG-сеанс.
-- Desktop `awg-shim` и Android-библиотека теперь собираются из одного общего Go-пакета с поддержкой полей AWG 3.1.
+- Ошибки запуска Android VPN теперь показывают корневую причину и пишут полный стек в системный лог.
 
 ## Установка
 
@@ -20,4 +21,4 @@
 - **macOS:** после установки выполните
   `sudo xattr -dr com.apple.quarantine /Applications/UniGate.app`
 
-> Android APK предназначен для устройств ARM64. Подключение AmneziaWG 3.1 требует финальной проверки на физическом устройстве.
+> Android APK предназначен для устройств ARM64.

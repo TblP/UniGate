@@ -19,6 +19,8 @@ $goBin = Join-Path $goPath "bin"
 $sdkDir = Join-Path $ToolRoot "android-sdk"
 $ndkDir = Join-Path $sdkDir "ndk\28.0.13004108"
 $destination = Join-Path $PSScriptRoot "..\src-tauri\gen\android\app\libs\libbox.aar"
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$awgSourceDir = Join-Path $projectRoot "awg-shim"
 
 if (-not (Test-Path -LiteralPath $goExe)) {
   throw "Go not found. Run scripts/setup-android.ps1 first."
@@ -53,18 +55,58 @@ if (-not (Test-Path -LiteralPath (Join-Path $goBin "gobind.exe"))) {
   if ($LASTEXITCODE -ne 0) { throw "Failed to install gobind" }
 }
 
-Push-Location $sourceDir
+New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
+$workDir = Join-Path $env:TEMP "unigate-android-go-work-$([guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+Push-Location $workDir
 try {
-  & $goExe run ./cmd/internal/build_libbox -target android -platform android/arm64
-  if ($LASTEXITCODE -ne 0) { throw "libbox build failed" }
+  & $goExe work init $sourceDir $awgSourceDir
+  if ($LASTEXITCODE -ne 0) { throw "Failed to create combined Go workspace" }
 } finally {
   Pop-Location
 }
 
-$aar = Join-Path $sourceDir "libbox.aar"
-if (-not (Test-Path -LiteralPath $aar)) {
-  throw "libbox.aar was not produced"
+$previousGoWork = [Environment]::GetEnvironmentVariable("GOWORK", "Process")
+$env:GOWORK = Join-Path $workDir "go.work"
+$tags = @(
+  "with_gvisor", "with_quic", "with_wireguard", "with_utls",
+  "with_naive_outbound", "with_clash_api", "badlinkname", "tfogo_checklinkname0",
+  "with_tailscale", "ts_omit_logtail", "ts_omit_ssh", "ts_omit_drive",
+  "ts_omit_taildrop", "ts_omit_webclient", "ts_omit_doctor", "ts_omit_capture",
+  "ts_omit_kube", "ts_omit_aws", "ts_omit_synology", "ts_omit_bird"
+) -join ","
+$ldflags = "-X github.com/sagernet/sing-box/constant.Version=v$version -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid= -checklinkname=0"
+
+Push-Location $sourceDir
+try {
+  $bindArgs = @(
+    "bind", "-v",
+    "-o", $destination,
+    "-target", "android/arm64",
+    "-androidapi", "24",
+    "-javapkg=io.nekohasekai",
+    "-libname=box",
+    "-trimpath",
+    "-buildvcs=false",
+    "-ldflags", $ldflags,
+    "-tags", $tags,
+    "./experimental/libbox",
+    "unigate/awg-shim"
+  )
+  & (Join-Path $goBin "gomobile.exe") @bindArgs
+  if ($LASTEXITCODE -ne 0) { throw "combined libbox + awg-shim build failed" }
+} finally {
+  Pop-Location
+  if ([string]::IsNullOrEmpty($previousGoWork)) {
+    Remove-Item Env:GOWORK -ErrorAction SilentlyContinue
+  } else {
+    $env:GOWORK = $previousGoWork
+  }
+  $resolvedWorkDir = [System.IO.Path]::GetFullPath($workDir)
+  $resolvedTemp = [System.IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+  if ($resolvedWorkDir.StartsWith($resolvedTemp, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Remove-Item -LiteralPath $resolvedWorkDir -Recurse -Force
+  }
 }
-New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
-Copy-Item -LiteralPath $aar -Destination $destination -Force
-Write-Host "libbox.aar ready: $destination"
+
+Write-Host "Combined libbox + awg-shim AAR ready: $destination"
