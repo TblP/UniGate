@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.13.14"
+$version = "1.14.0"
 $sourceDir = Join-Path $ToolRoot "sing-box-$version"
 $goExe = Join-Path $ToolRoot "go\bin\go.exe"
 $goPath = Join-Path $ToolRoot "gopath"
@@ -46,13 +46,21 @@ $env:ANDROID_NDK_HOME = $ndkDir
 $env:NDK_HOME = $ndkDir
 $env:Path = "$(Join-Path $ToolRoot 'go\bin');$goBin;$(Join-Path $env:JAVA_HOME 'bin');$env:Path"
 
-if (-not (Test-Path -LiteralPath (Join-Path $goBin "gomobile.exe"))) {
-  & $goExe install github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
-  if ($LASTEXITCODE -ne 0) { throw "Failed to install gomobile" }
-}
-if (-not (Test-Path -LiteralPath (Join-Path $goBin "gobind.exe"))) {
-  & $goExe install github.com/sagernet/gomobile/cmd/gobind@v0.1.12
-  if ($LASTEXITCODE -ne 0) { throw "Failed to install gobind" }
+# Версия gomobile-CLI берётся из Makefile соответствующего релиза sing-box
+# (lib_install). Штамп нужен, чтобы при апгрейде переустановить уже собранные
+# gomobile.exe/gobind.exe, а не молча собирать AAR старым биндером.
+$gomobileVersion = "v0.1.13"
+$gomobileStamp = Join-Path $goBin ".gomobile-version"
+$installedGomobile = if (Test-Path -LiteralPath $gomobileStamp) { (Get-Content -LiteralPath $gomobileStamp -Raw).Trim() } else { "" }
+$gomobileReady = (Test-Path -LiteralPath (Join-Path $goBin "gomobile.exe")) -and
+                 (Test-Path -LiteralPath (Join-Path $goBin "gobind.exe")) -and
+                 ($installedGomobile -eq $gomobileVersion)
+if (-not $gomobileReady) {
+  & $goExe install "github.com/sagernet/gomobile/cmd/gomobile@$gomobileVersion"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install gomobile $gomobileVersion" }
+  & $goExe install "github.com/sagernet/gomobile/cmd/gobind@$gomobileVersion"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install gobind $gomobileVersion" }
+  Set-Content -LiteralPath $gomobileStamp -Value $gomobileVersion -NoNewline
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null

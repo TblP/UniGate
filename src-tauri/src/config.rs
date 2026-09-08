@@ -112,7 +112,7 @@ fn generate_proxy(profile: &Profile, local_port: u16) -> Value {
 }
 
 /// TUN mode: виртуальный адаптер, весь трафик ОС идёт через профиль (нужен админ).
-/// Схема sing-box 1.13 (новый DNS, default_domain_resolver, sniff+hijack-dns).
+/// Схема sing-box 1.14 (новый DNS, default_domain_resolver, sniff+hijack-dns).
 /// Правила split-tunneling строятся из `routing`.
 fn generate_tun(
     profile: &Profile,
@@ -230,12 +230,11 @@ fn generate_tun(
         "final": dns_final,
         "strategy": "ipv4_only"
     });
-    // При split один и тот же домен может резолвиться разными серверами для
-    // разных приложений. Не даём ответу из remote-кэша попасть в local-запрос
-    // (и наоборот). Опция поддерживается нашей закреплённой версией 1.13.x.
-    if use_ru || !app_dns_rules.is_empty() {
-        dns["independent_cache"] = json!(true);
-    }
+    // Про кэш DNS при split: один и тот же домен может резолвиться разными
+    // серверами для разных приложений, и ответ из remote-кэша не должен
+    // попасть в local-запрос (и наоборот). До 1.14 это включал
+    // `independent_cache`; с 1.14 кэш всегда раздельный по тегу сервера, а
+    // опция объявлена deprecated (удаление в 1.16) — поэтому её здесь нет.
     let mut dns_rules: Vec<Value> = Vec::new();
     // RU-домены резолвим напрямую (через `local`, мимо туннеля): адрес совпадает
     // с тем, куда пойдёт direct-трафик (route rule_set geoip-ru срабатывает), а
@@ -693,7 +692,7 @@ mod tests {
         // RU-домены имеют приоритет и резолвятся напрямую; DNS выбранного
         // приложения идёт через VPN, DNS остальных — локально.
         assert_eq!(cfg["dns"]["final"], "local");
-        assert_eq!(cfg["dns"]["independent_cache"], true);
+        assert!(cfg["dns"]["independent_cache"].is_null());
         assert_eq!(cfg["dns"]["rules"][0]["server"], "local");
         assert_eq!(cfg["dns"]["rules"][1]["process_name"][0], "telegram.exe");
         assert_eq!(cfg["dns"]["rules"][1]["server"], "remote");
@@ -721,7 +720,7 @@ mod tests {
         );
         assert_eq!(cfg["route"]["final"], "proxy");
         assert_eq!(cfg["dns"]["final"], "remote");
-        assert_eq!(cfg["dns"]["independent_cache"], true);
+        assert!(cfg["dns"]["independent_cache"].is_null());
         assert_eq!(
             cfg["dns"]["rules"][0]["process_name"][0],
             "horizon-client.exe"

@@ -7,7 +7,7 @@
 # amneziawg/wintun — только Windows (см. fetch-singbox.ps1).
 set -euo pipefail
 
-SINGBOX_VERSION="1.13.14"
+SINGBOX_VERSION="1.14.0"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$ROOT/src-tauri/binaries"
 mkdir -p "$BIN_DIR"
@@ -34,9 +34,17 @@ else
 fi
 
 dest="$BIN_DIR/sing-box-${triple}"
+need_download=1
 if [ -f "$dest" ]; then
-  echo "sing-box уже на месте: $("$dest" version | head -1)"
-else
+  existing="$("$dest" version 2>/dev/null | head -1 || true)"
+  echo "sing-box уже на месте: $existing"
+  case "$existing" in
+    *"$SINGBOX_VERSION"*) need_download=0 ;;
+    *) echo "Версия отличается от $SINGBOX_VERSION — перекачиваю." ;;
+  esac
+fi
+
+if [ "$need_download" = 1 ]; then
   asset="sing-box-${SINGBOX_VERSION}-${sb_os}-${sb_arch}.tar.gz"
   url="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${asset}"
   tmp="$(mktemp -d)"
@@ -44,6 +52,9 @@ else
   curl -sL "$url" -o "$tmp/sb.tar.gz"
   tar -xzf "$tmp/sb.tar.gz" -C "$tmp"
   exe="$(find "$tmp" -name sing-box -type f | head -1)"
+  # Снимаем старый бинарник, а не пишем поверх: перезапись работающего
+  # sing-box вернёт ETXTBSY («Text file busy»), а unlink разрешён всегда.
+  rm -f "$dest"
   cp "$exe" "$dest"
   chmod +x "$dest"
   rm -rf "$tmp"

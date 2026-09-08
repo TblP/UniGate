@@ -85,7 +85,8 @@ pub async fn singbox_version(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 #[cfg(mobile)]
 pub async fn singbox_version(_app: tauri::AppHandle) -> Result<String, String> {
-    Ok("sing-box 1.13.14 (Android libbox)".into())
+    // Версия libbox пинится в scripts/build-libbox-android.ps1 — держим синхронно.
+    Ok("sing-box 1.14.0 (Android libbox)".into())
 }
 
 /// Возвращает текущие настройки (или значения по умолчанию, если файла нет).

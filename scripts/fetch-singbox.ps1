@@ -9,7 +9,7 @@
   macOS/Linux-варианты появятся вместе с поддержкой этих ОС (Phase 10).
 #>
 param(
-  [string]$Version = "1.13.14",
+  [string]$Version = "1.14.0",
   [string]$Triple  = "x86_64-pc-windows-msvc"
 )
 

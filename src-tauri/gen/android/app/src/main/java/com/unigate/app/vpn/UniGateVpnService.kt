@@ -25,17 +25,22 @@ import com.unigate.app.MainActivity
 import com.unigate.app.R
 import io.nekohasekai.awgshim.Awgshim
 import io.nekohasekai.awgshim.Protector
+import io.nekohasekai.libbox.BridgeOptions
+import io.nekohasekai.libbox.BridgeSession
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
 import io.nekohasekai.libbox.ConnectionOwner
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.LocalDNSTransport
+import io.nekohasekai.libbox.NeighborUpdateListener
 import io.nekohasekai.libbox.NetworkInterfaceIterator
 import io.nekohasekai.libbox.Notification
 import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.PlatformUser
 import io.nekohasekai.libbox.SetupOptions
+import io.nekohasekai.libbox.ShellSession
 import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.SystemProxyStatus
 import io.nekohasekai.libbox.TunOptions
@@ -319,9 +324,14 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         addAddresses(builder, options.inet6Address)
 
         if (options.autoRoute) {
-            val dns = options.dnsServerAddress?.value
-            if (!dns.isNullOrBlank()) {
-                builder.addDnsServer(dns)
+            // 1.14: getDNSServerAddress() отдаёт StringIterator вместо одного
+            // адреса (у tun теперь может быть несколько DNS, см. dns_mode).
+            val dnsServers = options.dnsServerAddress
+            while (dnsServers != null && dnsServers.hasNext()) {
+                val dns = dnsServers.next()
+                if (!dns.isNullOrBlank()) {
+                    builder.addDnsServer(dns)
+                }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 if (!addRoutes(builder, options.inet4RouteAddress) &&
@@ -416,7 +426,37 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     override fun clearDNSCache() = Unit
     override fun localDNSTransport(): LocalDNSTransport? = null
     override fun readWIFIState(): WIFIState? = null
-    override fun systemCertificates(): StringIterator? = null
+
+    // sing-box 1.14 расширил PlatformInterface. Заглушки повторяют семантику
+    // platformInterfaceStub из libbox: «не поддерживается» там, где Go-стаб
+    // возвращает os.ErrInvalid (в Java-биндинге это исключение), и no-op там,
+    // где стаб возвращает nil. Всё это — фичи десктопного sing-box (SSH-сервер
+    // Tailscale, L3-мост, neighbor-таблица), в Android-клиенте они не нужны.
+    override fun cancelNotification(identifier: String?, typeID: Int) = Unit
+    override fun registerMyInterface(name: String?) = Unit
+    override fun startNeighborMonitor(listener: NeighborUpdateListener?): Unit =
+        throw UnsupportedOperationException("neighbor monitor is not supported")
+    override fun closeNeighborMonitor(listener: NeighborUpdateListener?) = Unit
+    override fun usePlatformShell(): Boolean = false
+    override fun checkPlatformShell() = Unit
+    override fun openShellSession(
+        user: PlatformUser?,
+        command: String?,
+        environ: StringIterator?,
+        term: String?,
+        rows: Int,
+        cols: Int,
+    ): ShellSession = throw UnsupportedOperationException("platform shell is not supported")
+    override fun lookupUser(username: String?): PlatformUser =
+        throw UnsupportedOperationException("platform user lookup is not supported")
+    override fun lookupSFTPServer(): String =
+        throw UnsupportedOperationException("sftp server is not supported")
+    override fun readSystemSSHHostKey(): String =
+        throw UnsupportedOperationException("ssh host key is not supported")
+    override fun tailscaleHostname(): String = ""
+    override fun usePlatformBridge(): Boolean = false
+    override fun createBridge(options: BridgeOptions?): BridgeSession =
+        throw UnsupportedOperationException("platform bridge is not supported")
     override fun sendNotification(notification: Notification?) = Unit
 
     override fun findConnectionOwner(
@@ -556,6 +596,11 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     override fun getSystemProxyStatus(): SystemProxyStatus? = null
     override fun setSystemProxyEnabled(enabled: Boolean) = Unit
     override fun writeDebugMessage(message: String?) = Unit
+    // Новое в CommandServerHandler 1.14: краш-репорты и SSH-агент дашборда.
+    override fun triggerNativeCrash(): Unit =
+        throw UnsupportedOperationException("native crash trigger is not supported")
+    override fun connectSSHAgent(): Int =
+        throw UnsupportedOperationException("ssh agent is not supported")
 }
 
 private class ListStringIterator(values: List<String>) : StringIterator {
