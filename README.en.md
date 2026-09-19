@@ -83,8 +83,8 @@ Installers for Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) a
 >
 > **Android:**
 > - Allow your browser or file manager to **install unknown apps**.
-> - Play Protect and HyperOS may still warn that the APK did not come from a store: Android signatures are always self-signed, and trust follows the install source rather than the certificate.
-> - **The signing certificate changed in 1.2.0** — the build moved from debug to release signing. It will not install over an earlier version: remove that one first, saving your profiles through Share beforehand.
+> - **From 1.2.0** the build is a release build signed with the project's own key, so the system no longer flags it as unsafe.
+> - The signing certificate changed along with it, so the APK will not install over a version older than 1.2.0: remove that one first, saving your profiles through Share beforehand.
 
 ## Building and running locally
 
