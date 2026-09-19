@@ -24,6 +24,27 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        create("release") {
+            // Ключ подписи не хранится в репозитории: путь и пароль приходят
+            // снаружи. Основной канал — свойства ORG_GRADLE_PROJECT_*: их
+            // передаёт клиент Gradle, поэтому они долетают и при уже запущенном
+            // демоне, в отличие от System.getenv() (тот читает окружение
+            // демона). Прямые переменные оставлены как запасной вариант.
+            fun setting(property: String, variable: String): String? =
+                (project.findProperty(property) as String?)?.takeIf { it.isNotBlank() }
+                    ?: System.getenv(variable)?.takeIf { it.isNotBlank() }
+
+            val storePath = setting("unigateKeystore", "UNIGATE_ANDROID_KEYSTORE")
+            if (storePath != null) {
+                val store = setting("unigateKeystorePassword", "UNIGATE_ANDROID_KEYSTORE_PASSWORD")
+                storeFile = file(storePath)
+                storePassword = store
+                keyAlias = setting("unigateKeyAlias", "UNIGATE_ANDROID_KEY_ALIAS") ?: "unigate"
+                keyPassword = setting("unigateKeyPassword", "UNIGATE_ANDROID_KEY_PASSWORD") ?: store
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -37,7 +58,11 @@ android {
             }
         }
         getByName("release") {
-            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
+            // Kotlin-части (VpnPlugin, сервисы, виджеты) вызываются из Tauri и
+            // системы рефлексией/через манифест — R8 экономит здесь единицы
+            // килобайт, но легко ломает эти вызовы. Выключено осознанно.
+            isMinifyEnabled = false
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))

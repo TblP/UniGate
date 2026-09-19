@@ -1,5 +1,6 @@
 <#
-  Builds an installable ARM64 debug APK without requiring Windows Developer Mode.
+  Builds an installable, signed ARM64 release APK without requiring Windows
+  Developer Mode.
 
   Tauri normally creates a JNI symlink on Windows. This script lets Tauri
   compile Rust into an ASCII-only target directory, copies the library, strips
@@ -13,6 +14,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+# Магазины не принимают debug-сборки, а Android не даёт обновить APK, подписанный
+# другим сертификатом, поэтому ключ обязателен: без него сборка обязана упасть, а
+# не выпустить несовместимый пакет.
+$keystore = $env:UNIGATE_ANDROID_KEYSTORE
+if ([string]::IsNullOrWhiteSpace($keystore)) {
+  throw "UNIGATE_ANDROID_KEYSTORE is not set (path to the release .jks)"
+}
+$keystore = (Resolve-Path -LiteralPath $keystore).Path
+if ([string]::IsNullOrWhiteSpace($env:UNIGATE_ANDROID_KEYSTORE_PASSWORD)) {
+  throw "UNIGATE_ANDROID_KEYSTORE_PASSWORD is not set"
+}
+$keyAlias = $env:UNIGATE_ANDROID_KEY_ALIAS
+if ([string]::IsNullOrWhiteSpace($keyAlias)) { $keyAlias = "unigate" }
 $sdkDir = Join-Path $ToolRoot "android-sdk"
 $ndkDir = Join-Path $sdkDir "ndk\28.0.13004108"
 $targetDir = Join-Path $env:LOCALAPPDATA "unigate-android-target"
@@ -56,14 +71,23 @@ $env:ANDROID_SDK_ROOT = $sdkDir
 $env:NDK_HOME = $ndkDir
 $env:CARGO_TARGET_DIR = $targetDir
 
+# Свойства через ORG_GRADLE_PROJECT_* передаёт клиент Gradle, поэтому они доходят
+# до сборки даже при уже запущенном демоне с другим окружением.
+$env:ORG_GRADLE_PROJECT_unigateKeystore = $keystore
+$env:ORG_GRADLE_PROJECT_unigateKeystorePassword = $env:UNIGATE_ANDROID_KEYSTORE_PASSWORD
+$env:ORG_GRADLE_PROJECT_unigateKeyAlias = $keyAlias
+if (-not [string]::IsNullOrWhiteSpace($env:UNIGATE_ANDROID_KEY_PASSWORD)) {
+  $env:ORG_GRADLE_PROJECT_unigateKeyPassword = $env:UNIGATE_ANDROID_KEY_PASSWORD
+}
+
 $buildStarted = Get-Date
 Push-Location $projectRoot
 try {
   # A non-zero result is expected when Windows disallows Tauri's final symlink.
-  & npm.cmd run tauri -- android build --target aarch64 --debug
+  & npm.cmd run tauri -- android build --target aarch64
   $tauriExit = $LASTEXITCODE
 
-  $rustLibrary = Join-Path $targetDir "aarch64-linux-android\debug\libunigate_lib.so"
+  $rustLibrary = Join-Path $targetDir "aarch64-linux-android\release\libunigate_lib.so"
   if (-not (Test-Path -LiteralPath $rustLibrary)) {
     throw "Rust Android library was not produced (Tauri exit code $tauriExit)"
   }
@@ -88,7 +112,7 @@ try {
 
   Push-Location (Join-Path $projectRoot "src-tauri\gen\android")
   try {
-    & .\gradlew.bat :app:assembleArm64Debug -x :app:rustBuildArm64Debug --rerun-tasks
+    & .\gradlew.bat :app:assembleArm64Release -x :app:rustBuildArm64Release --rerun-tasks
     if ($LASTEXITCODE -ne 0) { throw "Gradle APK build failed" }
   } finally {
     Pop-Location
@@ -97,9 +121,10 @@ try {
   Pop-Location
 }
 
-$apk = Join-Path $projectRoot "src-tauri\gen\android\app\build\outputs\apk\arm64\debug\app-arm64-debug.apk"
+$apk = Join-Path $projectRoot "src-tauri\gen\android\app\build\outputs\apk\arm64\release\app-arm64-release.apk"
 if (-not (Test-Path -LiteralPath $apk)) {
-  throw "APK was not produced"
+  # Без подключённого signingConfig Gradle кладёт рядом *-unsigned.apk.
+  throw "Signed APK was not produced (check the signing configuration)"
 }
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw | ConvertFrom-Json).version
 $releaseDir = Join-Path $projectRoot "dist\android"
