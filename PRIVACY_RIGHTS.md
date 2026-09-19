@@ -35,7 +35,7 @@ UniGate не собирает персональные данные и не пе
 
 ## Как направить запрос
 
-Вопросы и запросы, связанные с персональными данными: **vczyplenkov@mail.ru**
+Вопросы и запросы, связанные с персональными данными, направляйте через раздел Issues в репозитории проекта: <https://github.com/TblP/UniGate/issues>
 
 Ответ направляется в течение 30 дней с момента получения запроса.
 
@@ -78,6 +78,6 @@ The developer shares data with no one. However, in the course of using the appli
 
 ## Submitting a request
 
-Questions and requests regarding personal data: **vczyplenkov@mail.ru**
+Questions and requests regarding personal data can be submitted through the project's issue tracker: <https://github.com/TblP/UniGate/issues>
 
 A response is provided within 30 days of receiving the request.

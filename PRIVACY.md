@@ -49,7 +49,7 @@ UniGate устанавливает соединения только в трёх
 
 ## Контакты
 
-По вопросам конфиденциальности: **vczyplenkov@mail.ru**
+По вопросам конфиденциальности используйте раздел Issues в репозитории проекта: <https://github.com/TblP/UniGate/issues>
 
 Права субъекта персональных данных описаны отдельно: [PRIVACY_RIGHTS.md](PRIVACY_RIGHTS.md)
 
@@ -106,6 +106,6 @@ When this policy changes, the date at the top is updated. The current version is
 
 ## Contact
 
-Privacy enquiries: **vczyplenkov@mail.ru**
+For privacy enquiries, please use the project's issue tracker: <https://github.com/TblP/UniGate/issues>
 
 Data subject rights are described separately: [PRIVACY_RIGHTS.md](PRIVACY_RIGHTS.md)
