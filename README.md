@@ -1,5 +1,22 @@
 # UniGate
 
+[![Release](https://img.shields.io/github/v/release/TblP/UniGate?style=flat-square&color=1f6feb)](https://github.com/TblP/UniGate/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/TblP/UniGate/total?style=flat-square&color=2ea043&logo=github&logoColor=white)](https://github.com/TblP/UniGate/releases)
+[![Stars](https://img.shields.io/github/stars/TblP/UniGate?style=flat-square&color=e3b341)](https://github.com/TblP/UniGate/stargazers)
+[![Build](https://img.shields.io/github/actions/workflow/status/TblP/UniGate/build-installers.yml?style=flat-square&label=build)](https://github.com/TblP/UniGate/actions/workflows/build-installers.yml)
+[![License](https://img.shields.io/github/license/TblP/UniGate?style=flat-square&color=8957e5)](LICENSE)
+
+![Windows](https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)
+![Android](https://img.shields.io/badge/Android_ARM64-3DDC84?style=flat-square&logo=android&logoColor=white)
+
+![Tauri](https://img.shields.io/badge/Tauri_2-24C8DB?style=flat-square&logo=tauri&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white)
+![React](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![sing-box](https://img.shields.io/badge/sing--box-F5A623?style=flat-square)
+
 **UniGate** — современный open-source клиент для **SELF HOSTING** VPN, прокси и туннелей в едином удобном интерфейсе.
 
 Проект объединяет разные сетевые технологии в одном приложении, избавляя от необходимости держать несколько разных клиентов. Единый центр управления подключениями, независимо от протокола.
@@ -51,7 +68,7 @@
 
 Инсталлеры под Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) и APK для Android ARM64.
 
-> Инсталлеры **не подписаны** (подпись/нотаризация не планируются).
+> Инсталлеры **пока не подписаны** — см. раздел [«Подпись кода»](#подпись-кода). Нотаризация macOS не планируется.
 > 
 > **macOS:** после установки снимите quarantine со всего bundle — это также разрешит вложенные `sing-box` и AmneziaWG:
 > ```bash
@@ -85,3 +102,14 @@ pwsh scripts/build-android.ps1   # dist/android/UniGate_<version>_android_arm64.
 
 npm run tauri dev                # запуск в dev-режиме
 npm run tauri build              # сборка (Windows → MSI + NSIS)
+```
+
+## Подпись кода
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+> **Статус:** заявка в SignPath Foundation на рассмотрении. Пока сертификат не выдан, релизные инсталлеры выходят без цифровой подписи — см. предупреждения в разделе «Готовые сборки».
+
+## Лицензия
+
+[MIT](LICENSE) © TblP

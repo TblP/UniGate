@@ -33,6 +33,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "TblP",
+    "homepage": "https://github.com/TblP/UniGate",
+    "copyright": "Copyright © 2026 TblP",
+    "license": "MIT",
+    "category": "Utility",
+    "shortDescription": "VPN, proxy and tunnel client with a single interface",
+    "longDescription": "UniGate is an open-source client for self-hosted VPN, proxy and tunnel connections. It manages profiles for Hysteria 2, VLESS, VMess, Trojan, Shadowsocks, TUIC, SOCKS5, HTTP and AmneziaWG, supports proxy and TUN modes, per-app and per-region split tunneling, and live traffic statistics. No telemetry.",
     "externalBin": [
       "binaries/sing-box"
     ],
