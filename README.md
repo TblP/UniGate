@@ -1,5 +1,7 @@
 # UniGate
 
+**Русский** · [English](README.en.md)
+
 [![Release](https://img.shields.io/github/v/release/TblP/UniGate?style=flat-square&color=1f6feb)](https://github.com/TblP/UniGate/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/TblP/UniGate/total?style=flat-square&color=2ea043&logo=github&logoColor=white)](https://github.com/TblP/UniGate/releases)
 [![Stars](https://img.shields.io/github/stars/TblP/UniGate?style=flat-square&color=e3b341)](https://github.com/TblP/UniGate/stargazers)
