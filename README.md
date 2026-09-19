@@ -70,7 +70,7 @@
 
 Инсталлеры под Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) и APK для Android ARM64.
 
-> Инсталлеры для Windows и macOS **пока не подписаны** — см. раздел [«Подпись кода»](#подпись-кода). Нотаризация macOS не планируется. Android-сборка подписана релизным ключом проекта.
+> Инсталлеры для Windows и macOS **пока не подписаны** — см. раздел [«Code signing policy»](#code-signing-policy). Нотаризация macOS не планируется. Android-сборка подписана релизным ключом проекта.
 > 
 > **macOS:** после установки снимите quarantine со всего bundle — это также разрешит вложенные `sing-box` и AmneziaWG:
 > ```bash
@@ -107,13 +107,24 @@ npm run tauri dev                # запуск в dev-режиме
 npm run tauri build              # сборка (Windows → MSI + NSIS)
 ```
 
-## Подпись кода
+## Code signing policy
 
 Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-Android-сборка подписывается собственным релизным ключом проекта — отпечаток сертификата сверяется в CI при каждом выпуске.
+> **Статус:** заявка в SignPath Foundation на рассмотрении. Пока сертификат не выдан, релизные инсталлеры для Windows выходят без цифровой подписи — см. предупреждения в разделе «Готовые сборки».
 
-> **Статус:** заявка в SignPath Foundation на рассмотрении. Пока сертификат не выдан, релизные инсталлеры выходят без цифровой подписи — см. предупреждения в разделе «Готовые сборки».
+**Роли в проекте**
+
+- Committers and reviewers: [TblP](https://github.com/TblP)
+- Approvers: [TblP](https://github.com/TblP)
+
+**Приватность**
+
+Приложение не передаёт данные никуда, кроме серверов, указанных самим пользователем: [политика конфиденциальности](PRIVACY.md).
+
+**Android**
+
+Android-сборка подписывается собственным релизным ключом проекта — отпечаток сертификата сверяется в CI при каждом выпуске.
 
 ## Приватность
 

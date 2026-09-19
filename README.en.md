@@ -70,7 +70,7 @@ Proxy protocols work both in local proxy mode and in TUN mode. They are added by
 
 Installers for Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) and an APK for Android ARM64.
 
-> The Windows and macOS installers are **not signed yet** — see [Code signing](#code-signing). macOS notarization is not planned. The Android build is signed with the project's release key.
+> The Windows and macOS installers are **not signed yet** — see [Code signing policy](#code-signing-policy). macOS notarization is not planned. The Android build is signed with the project's release key.
 >
 > **macOS:** after installing, clear the quarantine flag from the whole bundle — this also clears the bundled `sing-box` and AmneziaWG binaries:
 > ```bash
@@ -107,13 +107,24 @@ npm run tauri dev                # run in dev mode
 npm run tauri build              # build (Windows → MSI + NSIS)
 ```
 
-## Code signing
+## Code signing policy
 
 Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-The Android build is signed with the project's own release key; its certificate fingerprint is verified in CI on every release.
+> **Status:** the SignPath Foundation application is under review. Until the certificate is issued, Windows release installers ship without a digital signature — see the warnings under "Prebuilt binaries".
 
-> **Status:** the SignPath Foundation application is under review. Until the certificate is issued, release installers ship without a digital signature — see the warnings under "Prebuilt binaries".
+**Project roles**
+
+- Committers and reviewers: [TblP](https://github.com/TblP)
+- Approvers: [TblP](https://github.com/TblP)
+
+**Privacy**
+
+This program does not transfer any information to networked systems other than the servers specified by the user: [privacy policy](PRIVACY.md).
+
+**Android**
+
+The Android build is signed with the project's own release key; its certificate fingerprint is verified in CI on every release.
 
 ## Privacy
 
