@@ -118,10 +118,6 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 - Committers and reviewers: [TblP](https://github.com/TblP)
 - Approvers: [TblP](https://github.com/TblP)
 
-**Приватность**
-
-Приложение не передаёт данные никуда, кроме серверов, указанных самим пользователем: [политика конфиденциальности](PRIVACY.md).
-
 ## Приватность
 
 Телеметрии нет, данные не покидают устройство: [политика конфиденциальности](PRIVACY.md) · [права субъекта персональных данных](PRIVACY_RIGHTS.md).
