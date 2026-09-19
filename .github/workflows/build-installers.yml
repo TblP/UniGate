@@ -161,7 +161,7 @@ jobs:
           $verifyExitCode = $LASTEXITCODE
           Write-Host $signatureReport
           if ($verifyExitCode -ne 0) { throw "Android APK signature verification failed" }
-          $expectedCertificate = "0784732f63ae4de86adbfa65620a61bae836e6bff0eda2e18b5de598c5cf44a6"
+          $expectedCertificate = "45e22781f176e2121a39506fbdc4932a5085491f4c29438394e68a7d7af3e429"
           if ($signatureReport -notmatch "Signer #1 certificate SHA-256 digest:\s*$expectedCertificate") {
             throw "Android APK was signed by an unexpected certificate"
           }
