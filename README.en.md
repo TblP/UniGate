@@ -112,6 +112,10 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 
 > **Status:** the SignPath Foundation application is under review. Until the certificate is issued, release installers ship without a digital signature — see the warnings under "Prebuilt binaries".
 
+## Privacy
+
+No telemetry, and no data leaves the device: [privacy policy](PRIVACY.md) · [data subject rights](PRIVACY_RIGHTS.md).
+
 ## License
 
 [MIT](LICENSE) © TblP
