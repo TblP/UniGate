@@ -122,10 +122,6 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 
 This program does not transfer any information to networked systems other than the servers specified by the user: [privacy policy](PRIVACY.md).
 
-**Android**
-
-The Android build is signed with the project's own release key; its certificate fingerprint is verified in CI on every release.
-
 ## Privacy
 
 No telemetry, and no data leaves the device: [privacy policy](PRIVACY.md) · [data subject rights](PRIVACY_RIGHTS.md).
