@@ -70,7 +70,7 @@ Proxy protocols work both in local proxy mode and in TUN mode. They are added by
 
 Installers for Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) and an APK for Android ARM64.
 
-> The installers are **not signed yet** — see [Code signing](#code-signing). macOS notarization is not planned.
+> The Windows and macOS installers are **not signed yet** — see [Code signing](#code-signing). macOS notarization is not planned. The Android build is signed with the project's release key.
 >
 > **macOS:** after installing, clear the quarantine flag from the whole bundle — this also clears the bundled `sing-box` and AmneziaWG binaries:
 > ```bash
@@ -83,7 +83,8 @@ Installers for Windows (MSI + NSIS `setup.exe`), macOS (`.dmg`, Apple Silicon) a
 >
 > **Android:**
 > - Allow your browser or file manager to **install unknown apps**.
-> - Play Protect and HyperOS may warn that the APK did not come from a store. The build has no trusted publisher signature.
+> - Play Protect and HyperOS may still warn that the APK did not come from a store: Android signatures are always self-signed, and trust follows the install source rather than the certificate.
+> - **The signing certificate changed in 1.2.0** — the build moved from debug to release signing. It will not install over an earlier version: remove that one first, saving your profiles through Share beforehand.
 
 ## Building and running locally
 
@@ -109,6 +110,8 @@ npm run tauri build              # build (Windows → MSI + NSIS)
 ## Code signing
 
 Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+The Android build is signed with the project's own release key; its certificate fingerprint is verified in CI on every release.
 
 > **Status:** the SignPath Foundation application is under review. Until the certificate is issued, release installers ship without a digital signature — see the warnings under "Prebuilt binaries".
 
