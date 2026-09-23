@@ -72,7 +72,6 @@ pub fn generate_with_vpn_routes(
 /// Домен сервера outbound, если это именно домен (IP-литерал → None).
 /// AmneziaWG тоже участвует: awg-shim должен заранее узнать IP
 /// endpoint, чтобы его UDP-сокет гарантированно шёл direct и не зацикливался.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn server_domain(outbound: &Outbound) -> Option<&str> {
     let server = match outbound {
         Outbound::Socks { server, .. }

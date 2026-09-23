@@ -67,3 +67,23 @@ func TestAwgBoolRejectsUnknownValue(t *testing.T) {
 		t.Fatal("expected invalid boolean to fail")
 	}
 }
+
+// parseConf only builds UAPI text. Exercise the device too: older bundled
+// amneziawg-go versions rejected AWG 3.1 keepalive ranges at IpcSet.
+func TestStartAcceptsPersistentKeepaliveRange(t *testing.T) {
+	conf := `[Interface]
+Address = 10.8.1.7/32
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+HeaderProtectionKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+[Peer]
+PublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Endpoint = 127.0.0.1:9
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25-35
+`
+	if _, err := Start(conf, "127.0.0.1:0", nil); err != nil {
+		t.Fatalf("AWG 3.1 device rejected keepalive range: %v", err)
+	}
+	t.Cleanup(Stop)
+}

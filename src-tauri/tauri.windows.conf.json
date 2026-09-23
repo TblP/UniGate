@@ -1,5 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "pwsh -NoProfile -File scripts/build-awg-shim.ps1 && npm run build"
+  },
   "bundle": {
     "createUpdaterArtifacts": true,
     "externalBin": [

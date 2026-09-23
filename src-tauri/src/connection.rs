@@ -728,7 +728,6 @@ fn has_ipv6_route() -> bool {
 /// Резолвит домен сервера профиля системным резолвером (best-effort, таймаут 4 с).
 /// IPv4 — в начале списка (DNS-стратегия ядра ipv4_only). Пусто, если сервер
 /// задан IP-литералом или резолв не удался.
-#[cfg(not(target_os = "windows"))]
 async fn resolve_server_ips(outbound: &Outbound) -> Vec<std::net::IpAddr> {
     use std::net::ToSocketAddrs;
     let Some(host) = config::server_domain(outbound) else {
@@ -752,6 +751,70 @@ async fn resolve_server_ips(outbound: &Outbound) -> Vec<std::net::IpAddr> {
         Ok(Ok(ips)) => ips,
         _ => Vec::new(),
     }
+}
+
+/// На время сеанса закрепляем тот же IP в конфиге шима, который исключили из
+/// TUN. Иначе повторный DNS-запрос шима может выбрать другой A-запись.
+fn pin_awg_endpoint(
+    conf: &str,
+    server: &str,
+    port: u16,
+    ip: std::net::IpAddr,
+) -> Result<String, String> {
+    let expected = format!("{server}:{port}");
+    let replacement = std::net::SocketAddr::new(ip, port).to_string();
+    let mut result = String::with_capacity(conf.len());
+    let mut replaced = false;
+    for line in conf.split_inclusive('\n') {
+        let (body, newline) = if let Some(body) = line.strip_suffix("\r\n") {
+            (body, "\r\n")
+        } else if let Some(body) = line.strip_suffix('\n') {
+            (body, "\n")
+        } else {
+            (line, "")
+        };
+        if let Some((key, value)) = body.split_once('=') {
+            if key.trim().eq_ignore_ascii_case("Endpoint") && value.trim() == expected {
+                result.push_str(key);
+                result.push_str("= ");
+                result.push_str(&replacement);
+                result.push_str(newline);
+                replaced = true;
+                continue;
+            }
+        }
+        result.push_str(line);
+    }
+    if replaced {
+        Ok(result)
+    } else {
+        Err("не удалось закрепить IP: Endpoint в AWG-конфиге не совпадает с профилем".into())
+    }
+}
+
+/// Исключение на уровне маршрутов ОС надёжнее одного process_name-правила:
+/// Windows TUN не всегда определяет процесс для UDP-пакетов awg-shim.
+#[cfg(target_os = "windows")]
+fn exclude_awg_endpoint_from_tun(cfg: &mut serde_json::Value, ips: &[std::net::IpAddr]) {
+    let Some(tun) = cfg
+        .get_mut("inbounds")
+        .and_then(|v| v.as_array_mut())
+        .and_then(|inbounds| inbounds.iter_mut().find(|v| v["type"] == "tun"))
+    else {
+        return;
+    };
+    let mut excludes = tun["route_exclude_address"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for ip in ips {
+        let prefix = if ip.is_ipv4() { 32 } else { 128 };
+        let cidr = serde_json::json!(format!("{ip}/{prefix}"));
+        if !excludes.contains(&cidr) {
+            excludes.push(cidr);
+        }
+    }
+    tun["route_exclude_address"] = serde_json::Value::Array(excludes);
 }
 
 fn set_state(app: &AppHandle, state: ConnectionState) {
@@ -914,10 +977,9 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     };
     #[cfg(not(target_os = "windows"))]
     let vpn_route_excludes: Vec<String> = Vec::new();
-    // macOS/прочие + TUN: предрезолв домена сервера системным резолвером ДО
-    // запуска ядра — подъём туннеля не зависит от доступности публичного
-    // бутстрап-DNS (см. комментарий в config.rs). Best-effort с таймаутом:
-    // не вышло — генератор оставит старую схему (77.88.8.8).
+    // macOS/прочие + TUN: предрезолв домена сервера для DNS-бутстрапа.
+    // Windows + AWG shim + TUN: тот же IP нужен для исключения endpoint из
+    // маршрута TUN, иначе UDP шима может зациклиться при доменном Endpoint.
     #[cfg(not(target_os = "windows"))]
     let bootstrap_ips = if mode == Mode::Tun {
         resolve_server_ips(&profile.outbound).await
@@ -925,7 +987,41 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         Vec::new()
     };
     #[cfg(target_os = "windows")]
-    let bootstrap_ips: Vec<std::net::IpAddr> = Vec::new();
+    let bootstrap_ips = if mode == Mode::Tun && awg_shim {
+        resolve_server_ips(&profile.outbound).await
+    } else {
+        Vec::new()
+    };
+
+    let mut awg_endpoint_ips = Vec::new();
+    let mut shim_config = None;
+    if awg_shim {
+        if let Outbound::AmneziaWg {
+            config: conf,
+            server,
+            port,
+        } = &profile.outbound
+        {
+            if let Ok(ip) = server.parse::<std::net::IpAddr>() {
+                awg_endpoint_ips.push(ip);
+            } else if mode == Mode::Tun {
+                if let Some(&ip) = bootstrap_ips.first() {
+                    // Шим и исключение маршрута должны использовать один IP.
+                    let pinned = pin_awg_endpoint(conf, server, *port, ip).map_err(|e| {
+                        set_state(&app, ConnectionState::Error { message: e.clone() });
+                        e
+                    })?;
+                    shim_config = Some(pinned);
+                    awg_endpoint_ips.push(ip);
+                } else if cfg!(target_os = "windows") {
+                    let msg =
+                        format!("не удалось определить IP AWG-сервера {server} до запуска TUN");
+                    set_state(&app, ConnectionState::Error { message: msg.clone() });
+                    return Err(msg);
+                }
+            }
+        }
+    }
 
     // Перехватывать ли IPv6 в TUN: только если у системы реально есть
     // IPv6-маршрут. На IPv4-only сети фейковый IPv6 через tun ломает
@@ -961,6 +1057,11 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         &vpn_route_excludes,
     );
 
+    #[cfg(target_os = "windows")]
+    if awg_shim && mode == Mode::Tun {
+        exclude_awg_endpoint_from_tun(&mut cfg, &awg_endpoint_ips);
+    }
+
     // Трафик самого шима (UDP к AWG-серверу) обязан идти мимо TUN, иначе цикл:
     // правило по имени процесса + по IP endpoint. Доменный endpoint мы
     // предрезолвим до подъёма TUN; IP-литерал берём из профиля.
@@ -977,15 +1078,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
             {
                 extra.push(serde_json::json!({ "process_name": [name], "outbound": "direct" }));
             }
-            let mut endpoint_ips = bootstrap_ips.clone();
-            if let Outbound::AmneziaWg { server, .. } = &profile.outbound {
-                if let Ok(ip) = server.parse::<std::net::IpAddr>() {
-                    endpoint_ips.push(ip);
-                }
-            }
-            endpoint_ips.sort();
-            endpoint_ips.dedup();
-            for ip in endpoint_ips {
+            for ip in &awg_endpoint_ips {
                 let prefix = if ip.is_ipv4() { 32 } else { 128 };
                 extra.push(serde_json::json!({
                     "ip_cidr": [format!("{ip}/{prefix}")],
@@ -1042,7 +1135,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     let mut shim_child: Option<std::process::Child> = None;
     if awg_shim {
         if let Outbound::AmneziaWg { config: conf, .. } = &profile.outbound {
-            match start_awg_shim(&app, conf).await {
+            match start_awg_shim(&app, shim_config.as_deref().unwrap_or(conf)).await {
                 Ok(c) => shim_child = Some(c),
                 Err(e) => {
                     set_state(&app, ConnectionState::Error { message: e.clone() });
@@ -1614,7 +1707,46 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_awg_config_for_macos, parse_vpn_route_prefixes, valid_geoip};
+    use super::{
+        normalize_awg_config_for_macos, parse_vpn_route_prefixes, pin_awg_endpoint, valid_geoip,
+    };
+
+    #[test]
+    fn awg_domain_endpoint_is_pinned_to_session_ip() {
+        let conf = "[Interface]\r\nPrivateKey = TEST\r\n[Peer]\r\nEndpoint = vpn.example.com:45826\r\n";
+        let pinned = pin_awg_endpoint(
+            conf,
+            "vpn.example.com",
+            45826,
+            "203.0.113.10".parse().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            pinned,
+            "[Interface]\r\nPrivateKey = TEST\r\n[Peer]\r\nEndpoint = 203.0.113.10:45826\r\n"
+        );
+        assert!(
+            pin_awg_endpoint(conf, "wrong.example", 45826, "203.0.113.10".parse().unwrap())
+                .is_err()
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn awg_endpoint_exclusion_keeps_existing_tun_exclusions() {
+        let mut cfg = serde_json::json!({
+            "inbounds": [{
+                "type": "tun",
+                "route_exclude_address": ["192.168.0.0/16"]
+            }]
+        });
+        let ip = "203.0.113.10".parse().unwrap();
+        super::exclude_awg_endpoint_from_tun(&mut cfg, &[ip, ip]);
+        assert_eq!(
+            cfg["inbounds"][0]["route_exclude_address"],
+            serde_json::json!(["192.168.0.0/16", "203.0.113.10/32"])
+        );
+    }
 
     #[test]
     fn geoip_validation_rejects_html_and_truncated_data() {
