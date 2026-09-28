@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useAppStore } from "../../store/useAppStore";
+import { displayError, useI18n } from "../../lib/i18n";
 
-function formatTime(unix?: number): string {
+function formatTime(unix: number | undefined, language: string): string {
   if (!unix) return "—";
-  return new Date(unix * 1000).toLocaleString();
+  return new Date(unix * 1000).toLocaleString(language === "en" ? "en-US" : "ru-RU");
 }
 
 export function SubscriptionsPanel() {
+  const { language, t } = useI18n();
   const subscriptions = useAppStore((s) => s.subscriptions);
   const addSubscription = useAppStore((s) => s.addSubscription);
   const updateSubscription = useAppStore((s) => s.updateSubscription);
@@ -20,16 +22,16 @@ export function SubscriptionsPanel() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const add = async () => {
-    if (!url.trim()) return setError("Укажите URL подписки");
+    if (!url.trim()) return setError(t("subscriptions.requireUrl"));
     setBusy(true);
     setError(null);
     try {
-      await addSubscription(name.trim() || "Подписка", url.trim());
+      await addSubscription(name.trim() || t("subscriptions.defaultName"), url.trim());
       setName("");
       setUrl("");
       setAdding(false);
     } catch (e) {
-      setError(String(e));
+      setError(displayError(language, e, "errors.subscription"));
     } finally {
       setBusy(false);
     }
@@ -41,7 +43,7 @@ export function SubscriptionsPanel() {
     try {
       await updateSubscription(id);
     } catch (e) {
-      setError(String(e));
+      setError(displayError(language, e, "errors.subscription"));
     } finally {
       setUpdatingId(null);
     }
@@ -50,22 +52,22 @@ export function SubscriptionsPanel() {
   return (
     <section className="core-card">
       <div className="panel-head">
-        <h2>Подписки</h2>
-        {!adding && <button onClick={() => setAdding(true)}>+ Добавить</button>}
+        <h2>{t("nav.subscriptions")}</h2>
+        {!adding && <button onClick={() => setAdding(true)}>+ {t("common.add")}</button>}
       </div>
 
       {adding && (
         <div className="profile-form">
           <label>
-            Имя (необязательно)
+            {t("subscriptions.optionalName")}
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Мой провайдер"
+              placeholder={t("subscriptions.provider")}
             />
           </label>
           <label>
-            URL подписки
+            {t("subscriptions.url")}
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -75,7 +77,7 @@ export function SubscriptionsPanel() {
           {error && <p className="error">{error}</p>}
           <div className="profile-actions">
             <button onClick={add} disabled={busy}>
-              {busy ? "Загрузка…" : "Добавить"}
+              {busy ? t("common.loading") : t("common.add")}
             </button>
             <button
               onClick={() => {
@@ -84,7 +86,7 @@ export function SubscriptionsPanel() {
               }}
               disabled={busy}
             >
-              Отмена
+              {t("common.cancel")}
             </button>
           </div>
         </div>
@@ -94,7 +96,7 @@ export function SubscriptionsPanel() {
 
       {subscriptions.length === 0
         ? !adding && (
-            <p className="hint">Нет подписок. Вставь URL — создастся список серверов.</p>
+            <p className="hint">{t("subscriptions.empty")}</p>
           )
         : (
             <ul className="profile-list">
@@ -103,15 +105,15 @@ export function SubscriptionsPanel() {
                   <div className="profile-info">
                     <span className="profile-name">{s.name}</span>
                     <span className="profile-sub">
-                      {s.count} серв. · обновлено {formatTime(s.updatedAt)}
+                      {t("subscriptions.count", { count: s.count, date: formatTime(s.updatedAt, language) })}
                     </span>
                   </div>
                   <div className="profile-actions">
                     <button onClick={() => update(s.id)} disabled={updatingId === s.id}>
-                      {updatingId === s.id ? "Обновление…" : "Обновить"}
+                      {updatingId === s.id ? t("subscriptions.updating") : t("subscriptions.update")}
                     </button>
                     <button className="danger" onClick={() => deleteSubscription(s.id)}>
-                      Удалить
+                      {t("common.delete")}
                     </button>
                   </div>
                 </li>

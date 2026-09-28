@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAppStore } from "../../store/useAppStore";
+import { displayError, useI18n } from "../../lib/i18n";
 
 interface Props {
   onDone: () => void;
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export function ImportDialog({ onDone, onCancel }: Props) {
+  const { language, t } = useI18n();
   const importProfile = useAppStore((s) => s.importProfile);
   const [input, setInput] = useState("");
   const [name, setName] = useState("");
@@ -15,14 +17,14 @@ export function ImportDialog({ onDone, onCancel }: Props) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return setError("Вставьте ссылку или JSON");
+    if (!input.trim()) return setError(t("profiles.requireLink"));
     setBusy(true);
     setError(null);
     try {
       await importProfile(input, name.trim() || undefined);
       onDone();
     } catch (err) {
-      setError(String(err));
+      setError(displayError(language, err, "errors.import"));
     } finally {
       setBusy(false);
     }
@@ -31,18 +33,18 @@ export function ImportDialog({ onDone, onCancel }: Props) {
   return (
     <form className="profile-form" onSubmit={submit}>
       <label>
-        Ссылка или JSON
+        {t("profiles.linkOrJson")}
         <textarea
           className="import-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           rows={6}
-          placeholder={"hysteria2://...\nили\n{ \"type\": \"hysteria2\", \"server\": ... }"}
+          placeholder={`hysteria2://...\n${t("profiles.or")}\n{ "type": "hysteria2", "server": ... }`}
         />
       </label>
 
       <label>
-        Имя (необязательно — иначе из ссылки)
+        {t("profiles.importName")}
         <input value={name} onChange={(e) => setName(e.target.value)} />
       </label>
 
@@ -50,10 +52,10 @@ export function ImportDialog({ onDone, onCancel }: Props) {
 
       <div className="profile-actions">
         <button type="submit" disabled={busy}>
-          {busy ? "Импорт…" : "Импортировать"}
+          {busy ? t("profiles.importing") : t("profiles.importAction")}
         </button>
         <button type="button" onClick={onCancel} disabled={busy}>
-          Отмена
+          {t("common.cancel")}
         </button>
       </div>
     </form>

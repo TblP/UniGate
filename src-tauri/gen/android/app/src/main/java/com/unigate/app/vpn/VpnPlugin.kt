@@ -35,10 +35,23 @@ class StartVpnArgs {
     var excludePackages: List<String> = emptyList()
 }
 
+@InvokeArg
+class LanguageArgs {
+    var language: String = "ru"
+}
+
 @TauriPlugin
 class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     @Volatile
     private var cachedApps: List<Triple<String, String, String>>? = null
+
+    @Command
+    fun setLanguage(invoke: Invoke) {
+        UiLanguage.set(activity, invoke.parseArgs(LanguageArgs::class.java).language)
+        UniGateWidgetProvider.updateAll(activity)
+        UniGateCompactWidgetProvider.updateAll(activity)
+        invoke.resolve()
+    }
 
     @Command
     fun prepareAssets(invoke: Invoke) {
@@ -49,7 +62,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             }
             invoke.resolve(JSObject().apply { put("geoipPath", destination.absolutePath) })
         } catch (error: Exception) {
-            invoke.reject(error.message ?: "Не удалось подготовить geoip-ru.srs", error)
+            invoke.reject(error.message ?: UiLanguage.text(activity, com.unigate.app.R.string.vpn_geoip_failed), error)
         }
     }
 
@@ -73,7 +86,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 }
             } catch (error: Exception) {
                 activity.runOnUiThread {
-                    invoke.reject(error.message ?: "Не удалось получить список приложений", error)
+                    invoke.reject(error.message ?: UiLanguage.text(activity, com.unigate.app.R.string.vpn_apps_failed), error)
                 }
             }
         }.start()
@@ -102,7 +115,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         val manager = activity.getSystemService(StatusBarManager::class.java)
         manager.requestAddTileService(
             ComponentName(activity, UniGateTileService::class.java),
-            activity.getString(com.unigate.app.R.string.tile_label),
+            UiLanguage.text(activity, com.unigate.app.R.string.tile_label),
             Icon.createWithResource(activity, com.unigate.app.R.drawable.ic_tile_vpn),
             activity.mainExecutor,
         ) { result ->
@@ -145,7 +158,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         if (result.resultCode == Activity.RESULT_OK) {
             startService(invoke)
         } else {
-            invoke.reject("Android не выдал разрешение на создание VPN")
+            invoke.reject(UiLanguage.text(activity, com.unigate.app.R.string.vpn_permission_denied))
         }
     }
 
@@ -179,7 +192,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             }
             ContextCompat.startForegroundService(activity, intent)
             Thread {
-                val failure = UniGateVpnService.awaitStart(startToken, 30_000)
+                val failure = UniGateVpnService.awaitStart(activity, startToken, 30_000)
                 if (failure == null) {
                     invoke.resolve(JSObject().apply { put("started", true) })
                 } else {
@@ -188,7 +201,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             }.start()
         } catch (error: Exception) {
             VpnQuickControl.setShouldReconnect(activity, false)
-            invoke.reject(error.message ?: "Не удалось запустить Android VPN", error)
+            invoke.reject(error.message ?: UiLanguage.text(activity, com.unigate.app.R.string.vpn_start_failed), error)
         }
     }
 

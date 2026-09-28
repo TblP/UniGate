@@ -14,4 +14,13 @@
     <string name="widget_off">Выключен</string>
     <string name="widget_connecting">Подключение…</string>
     <string name="tile_label">UniGate VPN</string>
+    <string name="vpn_connecting">Подключение…</string>
+    <string name="vpn_connected">VPN подключён</string>
+    <string name="vpn_error">Ошибка VPN: %1$s</string>
+    <string name="vpn_timeout">VPN не запустился за %1$d с</string>
+    <string name="vpn_replaced">Запуск VPN был заменён более новым запросом</string>
+    <string name="vpn_permission_denied">Android не выдал разрешение на создание VPN</string>
+    <string name="vpn_geoip_failed">Не удалось подготовить geoip-ru.srs</string>
+    <string name="vpn_apps_failed">Не удалось получить список приложений</string>
+    <string name="vpn_start_failed">Не удалось запустить Android VPN</string>
 </resources>

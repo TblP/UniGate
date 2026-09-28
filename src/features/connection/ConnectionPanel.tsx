@@ -5,6 +5,7 @@ import { ipc } from "../../lib/ipc";
 import type { ConnectionState, Outbound, Profile } from "../../lib/types";
 import { ProfileForm } from "../profiles/ProfileForm";
 import { ImportDialog } from "../profiles/ImportDialog";
+import { displayError, useI18n } from "../../lib/i18n";
 
 type ShareFormat = "link" | "json";
 
@@ -17,17 +18,18 @@ function serverAddress(profile: Profile): string {
   return `${profile.outbound.server}:${profile.outbound.port}`;
 }
 
-const FORMAT_LABEL: Record<ShareFormat, string> = { link: "Ссылка", json: "JSON" };
+const FORMAT_LABEL: Record<ShareFormat, string> = { link: "connection.link", json: "JSON" };
 
 const STATUS_LABEL: Record<ConnectionState["state"], string> = {
-  disconnected: "Отключено",
-  connecting: "Подключение…",
-  connected: "Подключено",
-  disconnecting: "Отключение…",
-  error: "Ошибка",
+  disconnected: "status.disconnected",
+  connecting: "status.connecting",
+  connected: "status.connected",
+  disconnecting: "status.disconnecting",
+  error: "status.error",
 };
 
 export function ConnectionPanel() {
+  const { language, t } = useI18n();
   const connection = useAppStore((s) => s.connection);
   const profiles = useAppStore((s) => s.profiles);
   const activeId = useAppStore((s) => s.settings?.activeProfileId ?? null);
@@ -54,7 +56,7 @@ export function ConnectionPanel() {
   const state = connection.state;
   const isConnected = state === "connected";
   const isBusy = state === "connecting" || state === "disconnecting";
-  const errorMsg = connection.state === "error" ? connection.message : null;
+  const errorMsg = connection.state === "error" ? displayError(language, connection.message, "errors.connection") : null;
   // AmneziaWG через awg-shim ведёт себя как остальные протоколы (sing-box в
   // пути: split + статистика); legacy-движок — полный туннель без статистики
   const isAwgLegacy = active?.outbound.type === "amnezia_wg" && !awgShim;
@@ -69,7 +71,7 @@ export function ConnectionPanel() {
       const content = await ipc.exportProfile(id, format);
       setShared({ id, name, formats, format, content });
     } catch (e) {
-      setShared({ id, name, formats, format, content: `Ошибка экспорта: ${e}` });
+      setShared({ id, name, formats, format, content: displayError(language, e, "errors.export") });
     }
   };
 
@@ -86,14 +88,14 @@ export function ConnectionPanel() {
   return (
     <div className="connection-page">
       <section className="profile-picker-card">
-        <label htmlFor="active-profile">Сервер</label>
+        <label htmlFor="active-profile">{t("common.server")}</label>
         <select
           id="active-profile"
           value={activeId ?? ""}
           disabled={isBusy || isConnected}
           onChange={(event) => void setActiveProfile(event.target.value || null)}
         >
-          <option value="">Не выбран</option>
+          <option value="">{t("connection.noServer")}</option>
           {profiles.map((profile) => (
             <option key={profile.id} value={profile.id}>
               {profile.name} · {serverAddress(profile)}
@@ -101,8 +103,8 @@ export function ConnectionPanel() {
           ))}
         </select>
         <div className="profile-picker-actions">
-          <button onClick={() => setEditor("import")}>Импорт</button>
-          <button onClick={() => setEditor("create")}>+ Добавить</button>
+          <button onClick={() => setEditor("import")}>{t("common.import")}</button>
+          <button onClick={() => setEditor("create")}>+ {t("common.add")}</button>
         </div>
       </section>
 
@@ -120,7 +122,7 @@ export function ConnectionPanel() {
       {shared && (
         <div className="share-box connection-share">
           <div className="share-head">
-            <span>Поделиться: {shared.name}</span>
+            <span>{t("connection.shareName", { name: shared.name })}</span>
             <button onClick={() => setShared(null)}>✕</button>
           </div>
           {shared.formats.length > 1 && (
@@ -132,49 +134,49 @@ export function ConnectionPanel() {
                   className={format === shared.format ? "active" : ""}
                   onClick={() => void loadShare(shared.id, shared.name, shared.formats, format)}
                 >
-                  {FORMAT_LABEL[format]}
+                  {t(FORMAT_LABEL[format])}
                 </button>
               ))}
             </div>
           )}
           <textarea className="import-input" readOnly rows={shared.format === "json" ? 8 : 3} value={shared.content} />
           <button type="button" onClick={() => navigator.clipboard.writeText(shared.content)}>
-            Копировать
+            {t("common.copy")}
           </button>
         </div>
       )}
 
       <section className="core-card">
-      <h2>Подключение</h2>
+      <h2>{t("nav.connection")}</h2>
       {!active ? (
-        <p className="hint">Выбери сервер в списке выше или добавь новый профиль.</p>
+        <p className="hint">{t("connection.pickHint")}</p>
       ) : (
         <div className="conn-layout">
           <div className="conn-info">
             <p className="conn-profile">{active.name}</p>
             <p className="conn-address">{serverAddress(active)}</p>
             <div className="conn-profile-actions">
-              <button onClick={() => share(active)}>Поделиться</button>
+              <button onClick={() => share(active)}>{t("common.share")}</button>
               <button
                 className="danger"
                 disabled={isBusy || isConnected}
                 onClick={() => void deleteProfile(active.id)}
               >
-                Удалить
+                {t("common.delete")}
               </button>
             </div>
             <p className={`conn-status ${state}`}>
-              {STATUS_LABEL[state]}
+              {t(STATUS_LABEL[state])}
               {errorMsg ? `: ${errorMsg}` : ""}
             </p>
 
             {isConnected ? (
               <button className="big" onClick={disconnect}>
-                Отключиться
+                {t("connection.disconnect")}
               </button>
             ) : (
               <button className="big primary" onClick={connect} disabled={isBusy}>
-                {state === "connecting" ? "Подключение…" : "Подключиться"}
+                {state === "connecting" ? t("status.connecting") : t("connection.connect")}
               </button>
             )}
 
@@ -185,7 +187,7 @@ export function ConnectionPanel() {
                   <span className="speed up">↑ {formatSpeed(traffic?.up ?? 0)}</span>
                 </div>
                 <div className="traffic-totals">
-                  за сессию: ↓ {formatBytes(traffic?.downTotal ?? 0)} · ↑{" "}
+                  {t("connection.session")}: ↓ {formatBytes(traffic?.downTotal ?? 0)} · ↑{" "}
                   {formatBytes(traffic?.upTotal ?? 0)}
                 </div>
               </div>
@@ -194,11 +196,11 @@ export function ConnectionPanel() {
             {isConnected && (
               <p className="hint">
                 {isAwgLegacy
-                  ? "AmneziaWG — весь трафик ОС через туннель (статистика недоступна)"
+                  ? t("connection.legacy")
                   : mode === "tun"
-                    ? "Режим: TUN — весь трафик ОС через туннель"
+                    ? t("connection.tunMode")
                     : localProxy
-                      ? `Локальный прокси: ${localProxy}`
+                      ? t("connection.localProxy", { address: localProxy })
                       : ""}
               </p>
             )}
@@ -207,7 +209,7 @@ export function ConnectionPanel() {
           <img
             className={`conn-logo${isConnected ? " on" : ""}`}
             src={isConnected ? "/logo_on.png" : "/logo_off.png"}
-            alt={isConnected ? "Подключено" : "Отключено"}
+            alt={isConnected ? t("status.connected") : t("status.disconnected")}
           />
         </div>
       )}

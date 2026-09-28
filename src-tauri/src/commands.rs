@@ -91,14 +91,21 @@ pub async fn singbox_version(_app: tauri::AppHandle) -> Result<String, String> {
 
 /// Возвращает текущие настройки (или значения по умолчанию, если файла нет).
 #[tauri::command]
-pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
-    settings::load(&app)
+pub async fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
+    let current = settings::load(&app)?;
+    #[cfg(mobile)]
+    let _ = crate::connection::set_language(&app, &current.language).await;
+    Ok(current)
 }
 
 /// Сохраняет настройки на диск и возвращает сохранённое значение.
 #[tauri::command]
-pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
+pub async fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
     settings::save(&app, &settings)?;
+    #[cfg(desktop)]
+    let _ = crate::refresh_tray_language(&app, &settings.language);
+    #[cfg(mobile)]
+    let _ = crate::connection::set_language(&app, &settings.language).await;
     Ok(settings)
 }
 

@@ -3,14 +3,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../store/useAppStore";
 import { isMacOS, isWindows } from "../../lib/platform";
 import type { AppMode, Routing } from "../../lib/types";
+import { useI18n } from "../../lib/i18n";
 
 const APP_MODE_LABEL: Record<AppMode, string> = {
-  off: "Выключено (весь трафик через туннель)",
-  only: "Только выбранные приложения — через VPN",
-  except: "Выбранные приложения — напрямую",
+  off: "routing.off", only: "routing.only", except: "routing.except",
 };
 
 export function RoutingPanel() {
+  const { t } = useI18n();
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const awgShim = useAppStore((s) => s.awgShim);
@@ -45,8 +45,8 @@ export function RoutingPanel() {
       multiple: false,
       filters: [
         isMacOS
-          ? { name: "Программы", extensions: ["app"] }
-          : { name: "Программы", extensions: ["exe"] },
+          ? { name: t("routing.programs"), extensions: ["app"] }
+          : { name: t("routing.programs"), extensions: ["exe"] },
       ],
     });
     if (typeof selected === "string") {
@@ -59,9 +59,9 @@ export function RoutingPanel() {
 
   return (
     <section className="core-card">
-      <h2>Маршрутизация (split-tunneling)</h2>
+      <h2>{t("routing.title")}</h2>
       {!isTun && (
-        <p className="hint">Действует только в TUN-режиме (сейчас выбран Прокси).</p>
+        <p className="hint">{t("routing.tunOnly")}</p>
       )}
 
       <div className="settings">
@@ -77,7 +77,7 @@ export function RoutingPanel() {
               )
             }
           />
-          Локальная сеть (LAN) — напрямую
+          {t("routing.lan")}
         </label>
 
         {isWindows && (
@@ -89,12 +89,10 @@ export function RoutingPanel() {
                 disabled={!routing.bypassLan}
                 onChange={(e) => patch({ vpnCompatibility: e.target.checked })}
               />
-              Совместимость с другим VPN (OpenVPN)
+              {t("routing.vpnCompatibility")}
             </label>
             <p className="hint">
-              UniGate останется основным VPN, но сохранит корпоративные сети
-              активного OpenVPN/WireGuard. Системный DNS будет идти через
-              второй VPN или физическую сеть. Требует включённого обхода LAN.
+              {t("routing.vpnCompatibilityHint")}
             </p>
           </>
         )}
@@ -105,18 +103,18 @@ export function RoutingPanel() {
             checked={routing.bypassRu}
             onChange={(e) => patch({ bypassRu: e.target.checked })}
           />
-          RU-трафик — напрямую (geoip-ru + домены .ru/.рф/.su)
+          {t("routing.ru")}
         </label>
 
         <label>
-          По приложениям
+          {t("routing.apps")}
           <select
             value={routing.appMode}
             onChange={(e) => patch({ appMode: e.target.value as AppMode })}
           >
             {(["off", "only", "except"] as AppMode[]).map((m) => (
               <option key={m} value={m}>
-                {APP_MODE_LABEL[m]}
+                {t(APP_MODE_LABEL[m])}
               </option>
             ))}
           </select>
@@ -126,7 +124,7 @@ export function RoutingPanel() {
           <div className="apps">
             <div className="app-add">
               <button type="button" onClick={pickApp}>
-                {isMacOS ? "Выбрать .app…" : "Выбрать .exe…"}
+                {isMacOS ? t("routing.pickApp") : t("routing.pickExe")}
               </button>
               <input
                 value={appInput}
@@ -137,7 +135,7 @@ export function RoutingPanel() {
                     addApp();
                   }
                 }}
-                placeholder="или имя процесса вручную"
+                placeholder={t("routing.processPlaceholder")}
               />
               <button type="button" onClick={addApp}>
                 +
@@ -146,8 +144,8 @@ export function RoutingPanel() {
             {currentApps.length === 0 ? (
               <p className="hint">
                 {routing.appMode === "only"
-                  ? "Добавь приложения, которые пойдут через VPN."
-                  : "Добавь приложения, которые пойдут напрямую."}
+                  ? t("routing.onlyHint")
+                  : t("routing.exceptHint")}
               </p>
             ) : (
               <ul className="app-list">
@@ -170,7 +168,7 @@ export function RoutingPanel() {
 
         {!awgShim && (
           <p className="hint">
-            Не относится к AmneziaWG-профилям (у них свой движок).
+            {t("routing.awgLegacy")}
           </p>
         )}
       </div>

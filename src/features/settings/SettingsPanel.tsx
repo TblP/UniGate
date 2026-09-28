@@ -4,14 +4,16 @@ import { useAppStore } from "../../store/useAppStore";
 import { isMacOS, isWindows } from "../../lib/platform";
 import { ipc } from "../../lib/ipc";
 import type { Mode, Theme, TunStack } from "../../lib/types";
+import { useI18n } from "../../lib/i18n";
 
 const THEME_LABEL: Record<Theme, string> = {
-  system: "Системная",
-  light: "Светлая",
-  dark: "Тёмная",
+  system: "settings.systemTheme",
+  light: "settings.lightTheme",
+  dark: "settings.darkTheme",
 };
 
 export function SettingsPanel() {
+  const { t } = useI18n();
   const settings = useAppStore((s) => s.settings);
   const isElevated = useAppStore((s) => s.isElevated);
   const updateSettings = useAppStore((s) => s.updateSettings);
@@ -43,36 +45,34 @@ export function SettingsPanel() {
     }
   };
 
-  if (!settings) return <section className="card">Загрузка…</section>;
+  if (!settings) return <section className="card">{t("common.loading")}</section>;
 
   return (
     <section className="card">
-      <h2>Настройки</h2>
+      <h2>{t("nav.settings")}</h2>
       <div className="form-grid">
         <label>
-          Режим
+          {t("common.mode")}
           <select
             value={settings.mode}
             onChange={(e) => updateSettings({ mode: e.target.value as Mode })}
           >
-            <option value="proxy">Прокси (без прав)</option>
-            <option value="tun">TUN — весь трафик ОС</option>
+            <option value="proxy">{t("settings.proxy")}</option>
+            <option value="tun">{t("settings.tun")}</option>
           </select>
         </label>
 
         {settings.mode === "tun" &&
           (isMacOS ? (
             <div className="warn">
-              ℹ️ TUN-режим перенаправляет весь трафик ОС. При подключении macOS
-              запросит пароль администратора (для создания VPN-туннеля).
+              {t("settings.macAdmin")}
             </div>
           ) : (
             !isElevated && (
               <div className="warn">
-                ⚠️ TUN-режим перенаправляет весь трафик ОС и требует прав
-                администратора.
+                {t("settings.winAdmin")}
                 <button className="btn warn-action" onClick={relaunchElevated}>
-                  Перезапустить от администратора
+                  {t("settings.restartAdmin")}
                 </button>
               </div>
             )
@@ -81,52 +81,48 @@ export function SettingsPanel() {
         {settings.mode === "tun" && isWindows && (
           <>
             <label>
-              Сетевой стек TUN
+              {t("settings.tunStack")}
               <select
                 value={settings.tunStack}
                 onChange={(e) =>
                   updateSettings({ tunStack: e.target.value as TunStack })
                 }
               >
-                <option value="gvisor">gVisor (по умолчанию, совместимый)</option>
-                <option value="system">System (быстрее, под нагрузкой)</option>
-                <option value="mixed">Mixed (system TCP + gvisor UDP)</option>
+                <option value="gvisor">{t("settings.gvisor")}</option>
+                <option value="system">{t("settings.systemStack")}</option>
+                <option value="mixed">{t("settings.mixedStack")}</option>
               </select>
             </label>
             {settings.tunStack !== "gvisor" && (
               <div className="warn">
-                ℹ️ System-стек быстрее и меньше грузит CPU под высокой нагрузкой
-                (игры), но рядом с виртуальными адаптерами (VirtualBox, Docker,
-                Hyper-V) может не поймать часть трафика. Если после подключения
-                пропал интернет — верните gVisor. Стек применяется при следующем
-                подключении.
+                {t("settings.stackHint")}
               </div>
             )}
           </>
         )}
 
         <label>
-          Тема
+          {t("settings.theme")}
           <select
             value={settings.theme}
             onChange={(e) => updateSettings({ theme: e.target.value as Theme })}
           >
-            {(["system", "light", "dark"] as Theme[]).map((t) => (
-              <option key={t} value={t}>
-                {THEME_LABEL[t]}
+            {(["system", "light", "dark"] as Theme[]).map((theme) => (
+              <option key={theme} value={theme}>
+                {t(THEME_LABEL[theme])}
               </option>
             ))}
           </select>
         </label>
 
         <label>
-          Язык
+          {t("settings.language")}
           <select
             value={settings.language}
             onChange={(e) => updateSettings({ language: e.target.value })}
           >
-            <option value="ru">Русский</option>
-            <option value="en">English</option>
+            <option value="ru">{t("settings.russian")}</option>
+            <option value="en">{t("settings.english")}</option>
           </select>
         </label>
 
@@ -136,7 +132,7 @@ export function SettingsPanel() {
             checked={settings.autoConnect}
             onChange={(e) => updateSettings({ autoConnect: e.target.checked })}
           />
-          Автоподключение при старте
+          {t("settings.autoConnect")}
         </label>
 
         <label className="checkbox">
@@ -145,7 +141,7 @@ export function SettingsPanel() {
             checked={settings.minimizeToTray}
             onChange={(e) => updateSettings({ minimizeToTray: e.target.checked })}
           />
-          Закрытие окна сворачивает в трей
+          {t("settings.minimizeTray")}
         </label>
 
         <label className="checkbox">
@@ -154,7 +150,7 @@ export function SettingsPanel() {
             checked={autostart}
             onChange={(e) => toggleAutostart(e.target.checked)}
           />
-          Запускать при старте системы (свёрнутым в трей)
+          {t("settings.autostart")}
         </label>
 
         {isWindows && (
@@ -165,13 +161,11 @@ export function SettingsPanel() {
                 checked={settings.adminLaunch}
                 onChange={(e) => toggleAdminLaunch(e.target.checked)}
               />
-              Запускаться от администратора без запроса UAC
+              {t("settings.adminLaunch")}
             </label>
             {settings.adminLaunch && !isElevated && (
               <div className="warn">
-                ℹ️ Один раз подтвердите UAC — приложение создаст задачу в
-                Планировщике и дальше будет запускаться с правами администратора
-                автоматически (и при автозапуске, и вручную).
+                {t("settings.adminLaunchHint")}
               </div>
             )}
           </>

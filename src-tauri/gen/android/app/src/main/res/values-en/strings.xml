@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">UniGate</string>
+    <string name="main_activity_title">UniGate</string>
+    <string name="shortcut_connect">Connect</string>
+    <string name="shortcut_connect_long">Connect UniGate VPN</string>
+    <string name="shortcut_disconnect">Disconnect</string>
+    <string name="shortcut_disconnect_long">Disconnect UniGate VPN</string>
+    <string name="widget_description">Quick connection to UniGate VPN</string>
+    <string name="widget_large_name">UniGate 2×2</string>
+    <string name="widget_compact_name">UniGate Compact 1×1</string>
+    <string name="widget_compact_description">Compact UniGate VPN button without a label</string>
+    <string name="widget_toggle">Toggle UniGate VPN</string>
+    <string name="widget_on">On</string>
+    <string name="widget_off">Off</string>
+    <string name="widget_connecting">Connecting…</string>
+    <string name="tile_label">UniGate VPN</string>
+    <string name="vpn_connecting">Connecting…</string>
+    <string name="vpn_connected">VPN connected</string>
+    <string name="vpn_error">VPN error: %1$s</string>
+    <string name="vpn_timeout">VPN did not start within %1$d s</string>
+    <string name="vpn_replaced">VPN startup was superseded by a newer request</string>
+    <string name="vpn_permission_denied">Android did not grant permission to create a VPN</string>
+    <string name="vpn_geoip_failed">Could not prepare geoip-ru.srs</string>
+    <string name="vpn_apps_failed">Could not retrieve the application list</string>
+    <string name="vpn_start_failed">Could not start Android VPN</string>
+</resources>

@@ -64,7 +64,7 @@ class UniGateWidgetProvider : AppWidgetProvider() {
                 )
                 setTextViewText(
                     R.id.widget_status,
-                    context.getString(
+                    UiLanguage.text(context,
                         when (state) {
                             VpnQuickControl.State.OFF -> R.string.widget_off
                             VpnQuickControl.State.CONNECTING -> R.string.widget_connecting

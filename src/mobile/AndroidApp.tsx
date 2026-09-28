@@ -15,6 +15,7 @@ import { useAppStore } from "../store/useAppStore";
 import { ImportDialog } from "../features/profiles/ImportDialog";
 import { ProfileForm } from "../features/profiles/ProfileForm";
 import { UpdateButton } from "../components/UpdateButton";
+import { displayError, useI18n } from "../lib/i18n";
 
 type MobileTab = "connection" | "routing" | "settings";
 type Editor = "create" | "import" | null;
@@ -33,18 +34,14 @@ type IconName =
   | "info"
   | "chevron";
 
-const NAV: Array<{ id: MobileTab; label: string; icon: IconName }> = [
-  { id: "connection", label: "Подключение", icon: "bolt" },
-  { id: "routing", label: "Маршрутизация", icon: "route" },
-  { id: "settings", label: "Настройки", icon: "settings" },
+const NAV: Array<{ id: MobileTab; icon: IconName }> = [
+  { id: "connection", icon: "bolt" },
+  { id: "routing", icon: "route" },
+  { id: "settings", icon: "settings" },
 ];
 
 const STATUS_LABEL: Record<ConnectionState["state"], string> = {
-  disconnected: "Отключено",
-  connecting: "Подключение…",
-  connected: "Подключено",
-  disconnecting: "Отключение…",
-  error: "Ошибка подключения",
+  disconnected: "status.disconnected", connecting: "status.connecting", connected: "status.connected", disconnecting: "status.disconnecting", error: "status.error",
 };
 
 const PROTOCOL_LABEL: Record<Outbound["type"], string> = {
@@ -60,9 +57,7 @@ const PROTOCOL_LABEL: Record<Outbound["type"], string> = {
 };
 
 const APP_MODE_LABEL: Record<AppMode, string> = {
-  off: "Все приложения через VPN",
-  only: "Только выбранные через VPN",
-  except: "Выбранные напрямую",
+  off: "routing.allApps", only: "routing.mobileOnly", except: "routing.mobileExcept",
 };
 
 const IS_ANDROID_PREVIEW =
@@ -186,6 +181,7 @@ function Modal({
   children: React.ReactNode;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="mobile-modal-backdrop" onMouseDown={onClose}>
       <section
@@ -198,7 +194,7 @@ function Modal({
         <div className="mobile-sheet-handle" />
         <header className="mobile-sheet-head">
           <h2>{title}</h2>
-          <button className="mobile-icon-button" onClick={onClose} aria-label="Закрыть">
+          <button className="mobile-icon-button" onClick={onClose} aria-label={t("common.close")}>
             <Icon name="close" />
           </button>
         </header>
@@ -209,6 +205,7 @@ function Modal({
 }
 
 function MobileConnection() {
+  const { language, t } = useI18n();
   const profiles = useAppStore((state) => state.profiles);
   const activeId = useAppStore((state) => state.settings?.activeProfileId ?? null);
   const connection = useAppStore((state) => state.connection);
@@ -224,7 +221,7 @@ function MobileConnection() {
   const active = profiles.find((profile) => profile.id === activeId) ?? null;
   const busy = connection.state === "connecting" || connection.state === "disconnecting";
   const connected = connection.state === "connected";
-  const error = connection.state === "error" ? connection.message : null;
+  const error = connection.state === "error" ? displayError(language, connection.message, "errors.connection") : null;
 
   const create = async (name: string, outbound: Outbound) => {
     await createProfile(name, outbound);
@@ -238,7 +235,7 @@ function MobileConnection() {
     try {
       setShareText(await ipc.exportProfile(active.id, format));
     } catch (exportError) {
-      setShareText(`Ошибка экспорта: ${exportError}`);
+      setShareText(displayError(language, exportError, "errors.export"));
     }
   };
 
@@ -247,16 +244,16 @@ function MobileConnection() {
       <section className="mobile-card mobile-server-card">
         <div className="mobile-section-label">
           <Icon name="server" size={18} />
-          <span>Сервер</span>
+          <span>{t("common.server")}</span>
         </div>
         <label className="mobile-select-wrap">
           <select
-            aria-label="Активный сервер"
+            aria-label={t("connection.activeProfile")}
             value={activeId ?? ""}
             disabled={busy || connected}
             onChange={(event) => void setActiveProfile(event.target.value || null)}
           >
-            <option value="">Выберите профиль</option>
+            <option value="">{t("connection.selectProfile")}</option>
             {profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.name} · {serverAddress(profile)}
@@ -268,11 +265,11 @@ function MobileConnection() {
         <div className="mobile-row mobile-server-actions">
           <button className="mobile-secondary-button" onClick={() => setEditor("import")}>
             <Icon name="download" size={19} />
-            Импорт
+            {t("common.import")}
           </button>
           <button className="mobile-secondary-button" onClick={() => setEditor("create")}>
             <Icon name="plus" size={19} />
-            Добавить
+            {t("common.add")}
           </button>
         </div>
       </section>
@@ -280,12 +277,12 @@ function MobileConnection() {
       <section className={`mobile-card mobile-connect-card ${connected ? "is-connected" : ""}`}>
         <div className="mobile-profile-head">
           <div className="mobile-profile-copy">
-            <span className="mobile-eyebrow">Активный профиль</span>
-            <h1>{active?.name ?? "Сервер не выбран"}</h1>
+            <span className="mobile-eyebrow">{t("connection.activeProfile")}</span>
+            <h1>{active?.name ?? t("connection.noActiveServer")}</h1>
             <p>
               {active
                 ? `${PROTOCOL_LABEL[active.outbound.type]} · ${serverAddress(active)}`
-                : "Добавьте или импортируйте профиль"}
+                : t("connection.addOrImport")}
             </p>
           </div>
           <img
@@ -299,7 +296,7 @@ function MobileConnection() {
           <div className="mobile-row mobile-profile-actions">
             <button className="mobile-text-button" onClick={() => void share()}>
               <Icon name="share" size={18} />
-              Поделиться
+              {t("common.share")}
             </button>
             <button
               className="mobile-text-button danger"
@@ -307,14 +304,14 @@ function MobileConnection() {
               onClick={() => void deleteProfile(active.id)}
             >
               <Icon name="trash" size={18} />
-              Удалить
+              {t("common.delete")}
             </button>
           </div>
         )}
 
         <div className={`mobile-status mobile-status-${connection.state}`}>
           <span className="mobile-status-dot" />
-          <span>{STATUS_LABEL[connection.state]}</span>
+          <span>{t(STATUS_LABEL[connection.state])}</span>
         </div>
         {error && <p className="mobile-error">{error}</p>}
 
@@ -325,34 +322,34 @@ function MobileConnection() {
         >
           <Icon name="shield" />
           {connected
-            ? "Отключиться"
+            ? t("connection.disconnect")
             : connection.state === "connecting"
-              ? "Подключение…"
-              : "Подключиться"}
+              ? t("status.connecting")
+              : t("connection.connect")}
         </button>
 
         <div className="mobile-traffic">
           <div>
-            <span className="mobile-traffic-label">Загрузка</span>
+            <span className="mobile-traffic-label">{t("connection.download")}</span>
             <strong>↓ {formatSpeed(traffic?.down ?? 0)}</strong>
-            <small>{formatBytes(traffic?.downTotal ?? 0)} за сессию</small>
+            <small>{formatBytes(traffic?.downTotal ?? 0)} {t("connection.session")}</small>
           </div>
           <div>
-            <span className="mobile-traffic-label">Отдача</span>
+            <span className="mobile-traffic-label">{t("connection.upload")}</span>
             <strong>↑ {formatSpeed(traffic?.up ?? 0)}</strong>
-            <small>{formatBytes(traffic?.upTotal ?? 0)} за сессию</small>
+            <small>{formatBytes(traffic?.upTotal ?? 0)} {t("connection.session")}</small>
           </div>
         </div>
 
         <div className="mobile-info-line">
           <Icon name="info" size={18} />
-          <span>Android VPN · весь трафик проходит через защищённый TUN</span>
+          <span>{t("connection.androidTun")}</span>
         </div>
       </section>
 
       {editor && (
         <Modal
-          title={editor === "import" ? "Импорт профиля" : "Новый профиль"}
+          title={editor === "import" ? t("connection.importProfile") : t("connection.newProfile")}
           onClose={() => setEditor(null)}
         >
           {editor === "import" ? (
@@ -364,13 +361,13 @@ function MobileConnection() {
       )}
 
       {shareText !== null && (
-        <Modal title="Поделиться профилем" onClose={() => setShareText(null)}>
+        <Modal title={t("connection.shareProfile")} onClose={() => setShareText(null)}>
           <textarea className="mobile-share-text" readOnly value={shareText} rows={7} />
           <button
             className="mobile-connect-button"
             onClick={() => void navigator.clipboard.writeText(shareText)}
           >
-            Копировать
+            {t("common.copy")}
           </button>
         </Modal>
       )}
@@ -402,6 +399,7 @@ function MobileSwitch({
 }
 
 function MobileRouting() {
+  const { language, t } = useI18n();
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -411,7 +409,7 @@ function MobileRouting() {
   const [appSearch, setAppSearch] = useState("");
   const [draftApps, setDraftApps] = useState<string[]>([]);
 
-  if (!settings) return <div className="mobile-loading">Загрузка…</div>;
+  if (!settings) return <div className="mobile-loading">{t("common.loading")}</div>;
   const routing = settings.routing;
   const patch = (value: Partial<Routing>) =>
     void updateSettings({ routing: { ...routing, ...value } });
@@ -428,7 +426,7 @@ function MobileRouting() {
     try {
       setInstalledApps(await ipc.listInstalledApps());
     } catch (error) {
-      setAppsError(String(error));
+      setAppsError(displayError(language, error, "errors.apps"));
     } finally {
       setAppsLoading(false);
     }
@@ -454,32 +452,32 @@ function MobileRouting() {
   return (
     <div className="mobile-page">
       <header className="mobile-page-heading">
-        <h1>Маршрутизация</h1>
-        <p>Выберите, какой трафик должен идти напрямую.</p>
+        <h1>{t("nav.routing")}</h1>
+        <p>{t("routing.mobileHint")}</p>
       </header>
 
       <section className="mobile-card mobile-settings-card">
         <MobileSwitch
           checked={routing.bypassLan}
           onChange={(checked) => patch({ bypassLan: checked })}
-          title="Локальная сеть (LAN)"
-          description="Принтеры, роутер и домашние устройства — напрямую"
+          title={t("routing.lanMobile")}
+          description={t("routing.lanDescription")}
         />
         <MobileSwitch
           checked={routing.bypassRu}
           onChange={(checked) => patch({ bypassRu: checked })}
-          title="RU-трафик напрямую"
-          description="Российские IP и домены .ru, .рф, .su"
+          title={t("routing.ruMobile")}
+          description={t("routing.ruDescription")}
         />
       </section>
 
       <section className="mobile-card">
         <div className="mobile-section-label">
           <Icon name="route" size={18} />
-          <span>По приложениям</span>
+          <span>{t("routing.apps")}</span>
         </div>
         <label className="mobile-field">
-          <span>Режим</span>
+          <span>{t("common.mode")}</span>
           <div className="mobile-select-wrap">
             <select
               value={routing.appMode}
@@ -487,7 +485,7 @@ function MobileRouting() {
             >
               {(["off", "only", "except"] as AppMode[]).map((mode) => (
                 <option key={mode} value={mode}>
-                  {APP_MODE_LABEL[mode]}
+                  {t(APP_MODE_LABEL[mode])}
                 </option>
               ))}
             </select>
@@ -499,21 +497,21 @@ function MobileRouting() {
           <div className="mobile-apps">
             <p className="mobile-field-hint">
               {routing.appMode === "only"
-                ? "VPN будет работать только для выбранных приложений."
-                : "Выбранные приложения будут выходить в интернет напрямую."}
+                ? t("routing.mobileOnlyHint")
+                : t("routing.mobileExceptHint")}
             </p>
             <button className="mobile-app-picker-button" onClick={() => void openAppPicker()}>
               <span className="mobile-app-picker-plus">
                 <Icon name="plus" />
               </span>
               <span>
-                <strong>Выбрать приложения</strong>
-                <small>{apps.length ? `Выбрано: ${apps.length}` : "Открыть список приложений"}</small>
+                <strong>{t("routing.selectApps")}</strong>
+                <small>{apps.length ? t("routing.selected", { count: apps.length }) : t("routing.openApps")}</small>
               </span>
               <Icon name="chevron" size={18} />
             </button>
             {routing.appMode === "only" && apps.length === 0 && (
-              <p className="mobile-app-warning">Выберите хотя бы одно приложение.</p>
+              <p className="mobile-app-warning">{t("routing.selectOne")}</p>
             )}
             {apps.length > 0 && (
               <div className="mobile-selected-apps">
@@ -534,7 +532,7 @@ function MobileRouting() {
                       </span>
                       <button
                         onClick={() => setApps(apps.filter((item) => item !== packageName))}
-                        aria-label={`Убрать ${details?.name ?? packageName}`}
+                        aria-label={t("routing.removeApp", { name: details?.name ?? packageName })}
                       >
                         <Icon name="close" size={18} />
                       </button>
@@ -549,25 +547,25 @@ function MobileRouting() {
 
       <div className="mobile-note">
         <Icon name="info" size={20} />
-        <span>Изменения применятся при следующем подключении.</span>
+        <span>{t("routing.nextConnection")}</span>
       </div>
 
       {pickerOpen && (
-        <Modal title="Выбор приложений" onClose={() => setPickerOpen(false)}>
+        <Modal title={t("routing.appPicker")} onClose={() => setPickerOpen(false)}>
           <div className="mobile-app-picker">
             <div className="mobile-app-search">
               <input
                 value={appSearch}
                 onChange={(event) => setAppSearch(event.target.value)}
-                placeholder="Поиск по названию"
+                placeholder={t("routing.search")}
                 autoFocus
               />
             </div>
-            {appsLoading && <div className="mobile-loading">Загружаем приложения…</div>}
+            {appsLoading && <div className="mobile-loading">{t("routing.loadingApps")}</div>}
             {appsError && <div className="mobile-error">{appsError}</div>}
             {!appsLoading && !appsError && filteredApps.length === 0 && (
               <div className="mobile-loading">
-                {appSearch ? "Ничего не найдено" : "Приложения не найдены"}
+                {appSearch ? t("routing.nothingFound") : t("routing.noApps")}
               </div>
             )}
             <div className="mobile-app-list">
@@ -598,7 +596,7 @@ function MobileRouting() {
             </div>
             {filteredApps.length > visibleApps.length && (
               <p className="mobile-app-list-hint">
-                Показаны первые {visibleApps.length}. Найдите нужное приложение через поиск.
+                {t("routing.firstApps", { count: visibleApps.length })}
               </p>
             )}
             <button
@@ -609,7 +607,7 @@ function MobileRouting() {
               }}
               disabled={routing.appMode === "only" && draftApps.length === 0}
             >
-              Готово{draftApps.length ? ` · ${draftApps.length}` : ""}
+              {t("routing.done")}{draftApps.length ? ` · ${draftApps.length}` : ""}
             </button>
           </div>
         </Modal>
@@ -619,13 +617,14 @@ function MobileRouting() {
 }
 
 function MobileSettings() {
+  const { language, t } = useI18n();
   const settings = useAppStore((state) => state.settings);
   const coreVersion = useAppStore((state) => state.coreVersion);
   const coreError = useAppStore((state) => state.coreError);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const [integrationMessage, setIntegrationMessage] = useState<string | null>(null);
 
-  if (!settings) return <div className="mobile-loading">Загрузка…</div>;
+  if (!settings) return <div className="mobile-loading">{t("common.loading")}</div>;
 
   const requestWidget = async () => {
     setIntegrationMessage(null);
@@ -633,11 +632,11 @@ function MobileSettings() {
       const requested = await ipc.requestAndroidWidget();
       setIntegrationMessage(
         requested
-          ? "Запрос на добавление виджета отправлен лаунчеру."
-          : "HyperOS не разрешил автоматическое добавление. Откройте меню виджетов рабочего стола.",
+          ? t("settings.widgetRequested")
+          : t("settings.widgetManual"),
       );
     } catch (error) {
-      setIntegrationMessage(String(error));
+      setIntegrationMessage(displayError(language, error, "errors.integration"));
     }
   };
 
@@ -647,75 +646,75 @@ function MobileSettings() {
       const added = await ipc.requestAndroidQuickTile();
       setIntegrationMessage(
         added
-          ? "Плитка UniGate добавлена в быстрые настройки."
-          : "Плитка не добавлена. Её можно выбрать вручную при редактировании шторки.",
+          ? t("settings.tileAdded")
+          : t("settings.tileManual"),
       );
     } catch (error) {
-      setIntegrationMessage(String(error));
+      setIntegrationMessage(displayError(language, error, "errors.integration"));
     }
   };
 
   return (
     <div className="mobile-page">
       <header className="mobile-page-heading">
-        <h1>Настройки</h1>
-        <p>Параметры Android-приложения.</p>
+        <h1>{t("nav.settings")}</h1>
+        <p>{t("settings.androidDescription")}</p>
       </header>
 
       <section className="mobile-card mobile-settings-card">
         <label className="mobile-setting-row">
           <span>
-            <strong>Тема</strong>
-            <small>Оформление интерфейса</small>
+            <strong>{t("settings.theme")}</strong>
+            <small>{t("settings.appearance")}</small>
           </span>
           <select
             value={settings.theme}
             onChange={(event) => void updateSettings({ theme: event.target.value as Theme })}
           >
-            <option value="system">Системная</option>
-            <option value="dark">Тёмная</option>
-            <option value="light">Светлая</option>
+            <option value="system">{t("settings.systemTheme")}</option>
+            <option value="dark">{t("settings.darkTheme")}</option>
+            <option value="light">{t("settings.lightTheme")}</option>
           </select>
         </label>
         <label className="mobile-setting-row">
           <span>
-            <strong>Язык</strong>
-            <small>Язык приложения</small>
+            <strong>{t("settings.language")}</strong>
+            <small>{t("settings.appLanguage")}</small>
           </span>
           <select
             value={settings.language}
             onChange={(event) => void updateSettings({ language: event.target.value })}
           >
-            <option value="ru">Русский</option>
-            <option value="en">English</option>
+            <option value="ru">{t("settings.russian")}</option>
+            <option value="en">{t("settings.english")}</option>
           </select>
         </label>
         <MobileSwitch
           checked={settings.autoConnect}
           onChange={(checked) => void updateSettings({ autoConnect: checked })}
-          title="Автоподключение"
-          description="Подключаться к выбранному серверу при запуске"
+          title={t("settings.autoConnectMobile")}
+          description={t("settings.autoConnectDescription")}
         />
       </section>
 
       <section className="mobile-card">
         <div className="mobile-section-label">
           <Icon name="bolt" size={18} />
-          <span>Интеграция с Android</span>
+          <span>{t("settings.androidIntegration")}</span>
         </div>
         <div className="mobile-native-feature">
           <span>
-            <strong>Виджет на рабочем столе</strong>
-            <small>Compact 1×1; вариант 2×2 остаётся в меню виджетов</small>
+            <strong>{t("settings.homeWidget")}</strong>
+            <small>{t("settings.widgetDescription")}</small>
           </span>
-          <button onClick={() => void requestWidget()}>Добавить</button>
+          <button onClick={() => void requestWidget()}>{t("common.add")}</button>
         </div>
         <div className="mobile-native-feature">
           <span>
-            <strong>Плитка в шторке</strong>
-            <small>Подключение из быстрых настроек Android</small>
+            <strong>{t("settings.quickTile")}</strong>
+            <small>{t("settings.quickTileDescription")}</small>
           </span>
-          <button onClick={() => void requestQuickTile()}>Добавить</button>
+          <button onClick={() => void requestQuickTile()}>{t("common.add")}</button>
         </div>
         {integrationMessage && (
           <p className="mobile-native-message">{integrationMessage}</p>
@@ -726,16 +725,16 @@ function MobileSettings() {
         <div className="mobile-about-logo">
           <img src="/logo.png" alt="" />
           <div>
-            <strong>UniGate для Android</strong>
-            <span>Версия {__APP_VERSION__}</span>
+            <strong>{t("settings.androidName")}</strong>
+            <span>{t("common.version", { version: __APP_VERSION__ })}</span>
           </div>
         </div>
         <div className="mobile-about-row">
-          <span>VPN-движок</span>
-          <strong>{coreError ? "Недоступен" : coreVersion ?? "Проверка…"}</strong>
+          <span>{t("settings.vpnCore")}</span>
+          <strong>{coreError ? t("common.unavailable") : coreVersion ?? t("common.checking")}</strong>
         </div>
         <div className="mobile-about-row">
-          <span>Режим</span>
+          <span>{t("common.mode")}</span>
           <strong>TUN · gVisor</strong>
         </div>
       </section>
@@ -743,7 +742,7 @@ function MobileSettings() {
       <div className="mobile-note">
         <Icon name="shield" size={20} />
         <span>
-          Android покажет системный запрос на создание VPN при первом подключении.
+          {t("settings.androidPermission")}
         </span>
       </div>
     </div>
@@ -751,6 +750,7 @@ function MobileSettings() {
 }
 
 export function AndroidApp() {
+  const { language, t } = useI18n();
   const init = useAppStore((state) => state.init);
   const theme = useAppStore((state) => state.settings?.theme ?? "system");
   const connection = useAppStore((state) => state.connection);
@@ -782,6 +782,10 @@ export function AndroidApp() {
   }, [theme]);
 
   useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+
+  useEffect(() => {
     const syncNativeState = async () => {
       if (document.visibilityState !== "visible" || IS_ANDROID_PREVIEW) return;
       try {
@@ -804,8 +808,8 @@ export function AndroidApp() {
   }, []);
 
   const currentTitle = useMemo(
-    () => NAV.find((item) => item.id === tab)?.label ?? "UniGate",
-    [tab],
+    () => t(`nav.${tab}`),
+    [tab, language],
   );
 
   const navigate = (next: MobileTab) => {
@@ -819,7 +823,7 @@ export function AndroidApp() {
         <button
           className="mobile-icon-button"
           onClick={() => setDrawerOpen(true)}
-          aria-label="Открыть меню"
+          aria-label={t("mobile.openMenu")}
         >
           <Icon name="menu" />
         </button>
@@ -845,12 +849,12 @@ export function AndroidApp() {
           <img src="/logo.png" alt="" />
           <div>
             <strong>UniGate</strong>
-            <span>VPN для Android</span>
+            <span>{t("mobile.vpnForAndroid")}</span>
           </div>
           <button
             className="mobile-icon-button"
             onClick={() => setDrawerOpen(false)}
-            aria-label="Закрыть меню"
+            aria-label={t("mobile.closeMenu")}
           >
             <Icon name="close" />
           </button>
@@ -863,7 +867,7 @@ export function AndroidApp() {
               onClick={() => navigate(item.id)}
             >
               <Icon name={item.icon} />
-              <span>{item.label}</span>
+              <span>{t(`nav.${item.id}`)}</span>
               {item.id === "connection" && (
                 <span className={`mobile-nav-dot ${connection.state}`} />
               )}

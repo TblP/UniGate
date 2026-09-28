@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Outbound, Profile } from "../../lib/types";
+import { useI18n } from "../../lib/i18n";
 
 type ProtocolType = Outbound["type"]; // "socks" | "http" | "hysteria2"
 
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
+  const { t } = useI18n();
   const o = initial?.outbound;
   const hasAuth = o?.type === "socks" || o?.type === "http";
 
@@ -41,10 +43,10 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const portNum = Number.parseInt(port, 10);
-    if (!name.trim()) return setError("Укажите имя профиля");
-    if (!server.trim()) return setError("Укажите адрес сервера");
+    if (!name.trim()) return setError(t("profiles.requireName"));
+    if (!server.trim()) return setError(t("profiles.requireServer"));
     if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535)
-      return setError("Порт должен быть в диапазоне 1–65535");
+      return setError(t("profiles.invalidPort"));
 
     const srv = server.trim();
     let outbound: Outbound;
@@ -85,12 +87,12 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
   return (
     <form className="profile-form" onSubmit={submit}>
       <label>
-        Имя
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Мой профиль" />
+        {t("common.name")}
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("profiles.myProfile")} />
       </label>
 
       <label>
-        Протокол
+        {t("common.protocol")}
         <select value={type} onChange={(e) => setType(e.target.value as ProtocolType)}>
           <option value="socks">SOCKS5</option>
           <option value="http">HTTP(S)</option>
@@ -99,12 +101,12 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
       </label>
 
       <label>
-        Сервер
+        {t("common.server")}
         <input value={server} onChange={(e) => setServer(e.target.value)} placeholder="example.com" />
       </label>
 
       <label>
-        Порт
+        {t("common.port")}
         <input
           type="number"
           value={port}
@@ -117,11 +119,11 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
       {(type === "socks" || type === "http") && (
         <>
           <label>
-            Логин (необязательно)
+            {t("profiles.usernameOptional")}
             <input value={username} onChange={(e) => setUsername(e.target.value)} />
           </label>
           <label>
-            Пароль (необязательно)
+            {t("profiles.passwordOptional")}
             <input
               type="password"
               value={password}
@@ -134,14 +136,14 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
       {type === "http" && (
         <label className="checkbox">
           <input type="checkbox" checked={tls} onChange={(e) => setTls(e.target.checked)} />
-          TLS (HTTPS-прокси)
+          {t("profiles.httpTls")}
         </label>
       )}
 
       {type === "hysteria2" && (
         <>
           <label>
-            Пароль
+            {t("common.password")}
             <input
               type="password"
               value={password}
@@ -151,55 +153,53 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
 
           <details className="advanced">
             <summary>
-              Дополнительно — только если так настроен ваш сервер (обычно не нужно)
+              {t("profiles.advanced")}
             </summary>
 
             <label>
-              Домен для TLS (SNI)
+              {t("profiles.sni")}
               <input
                 value={sni}
                 onChange={(e) => setSni(e.target.value)}
-                placeholder="оставьте пустым — возьмётся адрес сервера"
+                placeholder={t("profiles.sniPlaceholder")}
               />
               <span className="field-hint">
-                Домен, на который выписан сертификат сервера. Если он совпадает с
-                адресом сервера — оставьте пустым.
+                {t("profiles.sniHint")}
               </span>
             </label>
 
             <label>
-              Пароль маскировки трафика (obfs)
+              {t("profiles.obfs")}
               <input
                 value={obfsPassword}
                 onChange={(e) => setObfsPassword(e.target.value)}
-                placeholder="оставьте пустым, если не уверены"
+                placeholder={t("profiles.obfsPlaceholder")}
               />
               <span className="field-hint">
-                Нужен, только если на сервере включена маскировка Salamander.
-                Если подключение и так работает — оставьте пустым.
+                {t("profiles.obfsHint")}
               </span>
             </label>
 
             <label>
-              Скорость канала, Мбит/с (необязательно)
+              {t("profiles.bandwidth")}
               <div className="row-2">
                 <input
                   type="number"
                   value={up}
                   onChange={(e) => setUp(e.target.value)}
                   min={0}
-                  placeholder="↑ отдача"
+                  placeholder={t("profiles.up")}
                 />
                 <input
                   type="number"
                   value={down}
                   onChange={(e) => setDown(e.target.value)}
                   min={0}
-                  placeholder="↓ загрузка"
+                  placeholder={t("profiles.down")}
                 />
               </div>
               <span className="field-hint">
-                Подсказка скорости вашего канала для ускорения. Можно не заполнять.
+                {t("profiles.bandwidthHint")}
               </span>
             </label>
 
@@ -209,11 +209,10 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
                 checked={insecure}
                 onChange={(e) => setInsecure(e.target.checked)}
               />
-              Разрешить недоверенный сертификат
+              {t("profiles.insecure")}
             </label>
             <span className="field-hint">
-              Включайте, только если у сервера самоподписанный сертификат (нет
-              настоящего домена). У вас есть домен — не включайте.
+              {t("profiles.insecureHint")}
             </span>
           </details>
         </>
@@ -222,9 +221,9 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
       {error && <p className="error">{error}</p>}
 
       <div className="profile-actions">
-        <button type="submit">{initial ? "Сохранить" : "Создать"}</button>
+        <button type="submit">{initial ? t("common.save") : t("common.create")}</button>
         <button type="button" onClick={onCancel}>
-          Отмена
+          {t("common.cancel")}
         </button>
       </div>
     </form>

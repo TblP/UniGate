@@ -4,6 +4,7 @@ import { ipc } from "../../lib/ipc";
 import type { Outbound, Profile } from "../../lib/types";
 import { ProfileForm } from "./ProfileForm";
 import { ImportDialog } from "./ImportDialog";
+import { displayError, useI18n } from "../../lib/i18n";
 
 function outboundSummary(o: Outbound): string {
   const addr = `${o.server}:${o.port}`;
@@ -65,7 +66,7 @@ function shareFormats(o: Outbound): ShareFormat[] {
   }
 }
 
-const FORMAT_LABEL: Record<ShareFormat, string> = { link: "Ссылка", json: "JSON" };
+const FORMAT_LABEL: Record<ShareFormat, string> = { link: "connection.link", json: "JSON" };
 
 type Editor =
   | { mode: "create" }
@@ -74,6 +75,7 @@ type Editor =
   | null;
 
 export function ProfilesPanel() {
+  const { language, t } = useI18n();
   const profiles = useAppStore((s) => s.profiles);
   const activeId = useAppStore((s) => s.settings?.activeProfileId ?? null);
   const createProfile = useAppStore((s) => s.createProfile);
@@ -101,7 +103,7 @@ export function ProfilesPanel() {
       const content = await ipc.exportProfile(id, format);
       setShared({ id, name, formats, format, content });
     } catch (e) {
-      setShared({ id, name, formats, format, content: `Ошибка экспорта: ${e}` });
+      setShared({ id, name, formats, format, content: displayError(language, e, "errors.export") });
     }
   };
 
@@ -122,11 +124,11 @@ export function ProfilesPanel() {
   return (
     <section className="core-card">
       <div className="panel-head">
-        <h2>Профили</h2>
+        <h2>{t("profiles.title")}</h2>
         {!editor && (
           <div className="panel-head-actions">
-            <button onClick={() => setEditor({ mode: "import" })}>Импорт</button>
-            <button onClick={() => setEditor({ mode: "create" })}>+ Добавить</button>
+            <button onClick={() => setEditor({ mode: "import" })}>{t("common.import")}</button>
+            <button onClick={() => setEditor({ mode: "create" })}>+ {t("common.add")}</button>
           </div>
         )}
       </div>
@@ -134,7 +136,7 @@ export function ProfilesPanel() {
       {shared && (
         <div className="share-box">
           <div className="share-head">
-            <span>Поделиться: {shared.name}</span>
+            <span>{t("connection.shareName", { name: shared.name })}</span>
             <button onClick={() => setShared(null)}>✕</button>
           </div>
           {shared.formats.length > 1 && (
@@ -148,7 +150,7 @@ export function ProfilesPanel() {
                     void loadShare(shared.id, shared.name, shared.formats, f)
                   }
                 >
-                  {FORMAT_LABEL[f]}
+                  {t(FORMAT_LABEL[f])}
                 </button>
               ))}
             </div>
@@ -163,7 +165,7 @@ export function ProfilesPanel() {
             type="button"
             onClick={() => navigator.clipboard.writeText(shared.content)}
           >
-            Копировать
+            {t("common.copy")}
           </button>
         </div>
       )}
@@ -177,7 +179,7 @@ export function ProfilesPanel() {
           onCancel={() => setEditor(null)}
         />
       ) : profiles.length === 0 ? (
-        <p className="hint">Пока нет профилей. Добавь первый.</p>
+        <p className="hint">{t("profiles.empty")}</p>
       ) : (
         <ul className="profile-list">
           {profiles.map((p) => (
@@ -185,12 +187,12 @@ export function ProfilesPanel() {
               <div className="profile-info">
                 <span className="profile-name">
                   {p.name}
-                  {p.id === activeId && <span className="badge">активный</span>}
+                  {p.id === activeId && <span className="badge">{t("profiles.active")}</span>}
                 </span>
                 <span className="profile-sub">
                   {outboundSummary(p.outbound)}
                   {hasAuth(p.outbound) && (
-                    <span className="auth-badge" title="Профиль с авторизацией (логин/пароль)">
+                    <span className="auth-badge" title={t("connection.authProfile")}>
                       🔑
                     </span>
                   )}
@@ -198,19 +200,19 @@ export function ProfilesPanel() {
               </div>
               <div className="profile-actions">
                 {p.id === activeId ? (
-                  <button onClick={() => setActiveProfile(null)}>Снять выбор</button>
+                  <button onClick={() => setActiveProfile(null)}>{t("profiles.deselect")}</button>
                 ) : (
-                  <button onClick={() => setActiveProfile(p.id)}>Выбрать</button>
+                  <button onClick={() => setActiveProfile(p.id)}>{t("profiles.select")}</button>
                 )}
                 {isFormEditable(p.outbound) && (
                   <button onClick={() => setEditor({ mode: "edit", profile: p })}>
-                    Изменить
+                    {t("profiles.edit")}
                   </button>
                 )}
-                <button onClick={() => duplicateProfile(p.id)}>Дублировать</button>
-                <button onClick={() => share(p)}>Поделиться</button>
+                <button onClick={() => duplicateProfile(p.id)}>{t("profiles.duplicate")}</button>
+                <button onClick={() => share(p)}>{t("common.share")}</button>
                 <button className="danger" onClick={() => deleteProfile(p.id)}>
-                  Удалить
+                  {t("common.delete")}
                 </button>
               </div>
             </li>

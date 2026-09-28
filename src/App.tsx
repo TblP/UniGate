@@ -9,17 +9,18 @@ import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { AndroidApp } from "./mobile/AndroidApp";
 import { isAndroid } from "./lib/platform";
 import type { Theme } from "./lib/types";
+import { displayError, useI18n } from "./lib/i18n";
 import "./App.css";
 import "./mobile/android.css";
 
 type TabId = "connection" | "subscriptions" | "routing" | "settings";
 
-const NAV: { id: TabId; label: string; icon: string }[] = [
-  { id: "connection", label: "Подключение", icon: "⚡" },
+const NAV: { id: TabId; icon: string }[] = [
+  { id: "connection", icon: "⚡" },
   // Вкладка «Подписки» скрыта (hidden) — панель остаётся в коде, но не в навигации.
   // { id: "subscriptions", label: "Подписки", icon: "🔗" },
-  { id: "routing", label: "Маршрутизация", icon: "🧭" },
-  { id: "settings", label: "Настройки", icon: "⚙️" },
+  { id: "routing", icon: "🧭" },
+  { id: "settings", icon: "⚙️" },
 ];
 
 function applyTheme(theme: Theme) {
@@ -33,6 +34,7 @@ function applyTheme(theme: Theme) {
 }
 
 function App() {
+  const { language, t } = useI18n();
   const coreVersion = useAppStore((s) => s.coreVersion);
   const coreError = useAppStore((s) => s.coreError);
   const theme = useAppStore((s) => s.settings?.theme ?? "system");
@@ -44,6 +46,10 @@ function App() {
   useEffect(() => {
     init();
   }, [init]);
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -90,7 +96,7 @@ function App() {
               onClick={() => setTab(n.id)}
             >
               <span className="nav-icon">{n.icon}</span>
-              {n.label}
+              {t(`nav.${n.id}`)}
               {n.id === "connection" && <span className={statusDot} />}
             </button>
           ))}
@@ -99,13 +105,13 @@ function App() {
         <div className="sidebar-foot">
           <UpdateButton />
           {coreError ? (
-            <span className="core-badge err" title={coreError}>
-              ❌ ядро недоступно
+            <span className="core-badge err" title={displayError(language, coreError, "errors.core")}>
+              ❌ {t("connection.notAvailable")}
             </span>
           ) : (
             <span
               className="core-badge"
-              title={coreVersion ? `Ядро: ${coreVersion}` : "проверка ядра…"}
+              title={coreVersion ? t("connection.core", { version: coreVersion }) : t("connection.coreChecking")}
             >
               v{__APP_VERSION__}
             </span>

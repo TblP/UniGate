@@ -1,12 +1,19 @@
-# UniGate 1.2.1 — доменные адреса AmneziaWG
+# UniGate 1.2.2 — English interface
 
 ## Что нового
 
-- AmneziaWG: адрес сервера в `Endpoint` может быть доменным именем, например `vpn.example.com:45826`. При смене IP достаточно обновить DNS-запись; менять адрес в каждом профиле не нужно. При новом подключении домен разрешается заново.
-- Windows: адрес сервера определяется до включения TUN, а маршрут к нему проходит вне VPN-туннеля. Это устраняет потерю соединения при использовании доменного `Endpoint`.
-- Windows: при сборке установщика AmneziaWG shim теперь пересобирается из закреплённой версии AmneziaWG 3.1. Исправлена ошибка запуска профилей с диапазоном `PersistentKeepalive`, например `25-35`.
-- macOS и Android используют тот же код AmneziaWG shim для разрешения доменного адреса. Общий код проверен тестами на Windows; подключение на реальных устройствах с macOS и Android для этого релиза не проверялось.
+- Добавлен английский язык интерфейса для Windows, macOS и Android. Переключатель находится в настройках; язык меняется сразу и сохраняется после перезапуска.
+- Переведены экраны подключения, профилей, маршрутизации и настроек, а также меню трея, единицы трафика и системные элементы Android.
+- Русский язык остаётся доступен в том же переключателе.
 
-## Установка
+## What's new
+
+- The interface is now available in English on Windows, macOS, and Android. Change the language in Settings; the choice takes effect immediately and persists after restart.
+- Connection, profiles, routing, settings, the tray menu, traffic units, and Android system surfaces have English translations.
+- Russian remains available from the same setting.
+
+## Установка / Installation
 
 Сборки для Windows, macOS и Android публикуются ниже. Android APK предназначен для устройств ARM64.
+
+Windows, macOS, and Android downloads are listed below. The Android APK is for ARM64 devices.

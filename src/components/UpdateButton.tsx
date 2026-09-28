@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { isWindows } from "../lib/platform";
 import { ipc } from "../lib/ipc";
+import { useI18n, translate, currentLanguage } from "../lib/i18n";
+import { useAppStore } from "../store/useAppStore";
 
 const LATEST_RELEASE_API =
   "https://api.github.com/repos/TblP/UniGate/releases/latest";
@@ -41,7 +43,7 @@ async function findAvailableUpdate(signal: AbortSignal): Promise<AvailableUpdate
     cache: "no-store",
     headers: { Accept: "application/vnd.github+json" },
   });
-  if (!response.ok) throw new Error(`GitHub ответил ${response.status}`);
+  if (!response.ok) throw new Error(translate(currentLanguage(useAppStore.getState().settings?.language), "update.githubError", { status: response.status }));
 
   const release = (await response.json()) as {
     tag_name?: string;
@@ -59,6 +61,7 @@ async function findAvailableUpdate(signal: AbortSignal): Promise<AvailableUpdate
 }
 
 export function UpdateButton() {
+  const { t } = useI18n();
   const [update, setUpdate] = useState<AvailableUpdate | null>(null);
   const [state, setState] = useState<UpdateState>({ phase: "idle" });
 
@@ -83,7 +86,7 @@ export function UpdateButton() {
       setState({ phase: "downloading", progress: null });
       const { check } = await import("@tauri-apps/plugin-updater");
       const pending = await check({ timeout: 30_000 });
-      if (!pending) throw new Error("обновление пока недоступно для загрузки");
+      if (!pending) throw new Error(t("update.unavailable"));
 
       let downloaded = 0;
       let total: number | undefined;
@@ -113,15 +116,15 @@ export function UpdateButton() {
     }
   };
 
-  let label = isWindows ? `Обновить до v${update.version}` : `Скачать v${update.version}`;
+  let label = isWindows ? t("update.upgrade", { version: update.version }) : t("update.download", { version: update.version });
   if (state.phase === "downloading") {
-    label = state.progress === null ? "Загрузка…" : `Загрузка ${state.progress}%`;
+    label = state.progress === null ? t("update.downloading") : t("update.progress", { progress: state.progress });
   } else if (state.phase === "stopping") {
-    label = "Остановка VPN…";
+    label = t("update.stopping");
   } else if (state.phase === "installing") {
-    label = "Запуск установки…";
+    label = t("update.installing");
   } else if (state.phase === "error") {
-    label = "Повторить обновление";
+    label = t("update.retry");
   }
 
   const busy =

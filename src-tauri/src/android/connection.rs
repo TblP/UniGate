@@ -61,6 +61,19 @@ struct QuickTileResponse {
     added: bool,
 }
 
+#[derive(Serialize)]
+struct LanguageRequest<'a> {
+    language: &'a str,
+}
+
+pub async fn set_language(app: &AppHandle, language: &str) -> Result<(), String> {
+    app.state::<VpnPlugin<tauri::Wry>>()
+        .0
+        .run_mobile_plugin_async::<()>("setLanguage", LanguageRequest { language })
+        .await
+        .map_err(|error| error.to_string())
+}
+
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("unigate-vpn")
         .setup(|app, api| {

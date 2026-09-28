@@ -76,11 +76,26 @@ fn show_main(app: &AppHandle) {
 
 /// Иконка в системном трее с меню (Показать / Скрыть / Выход).
 #[cfg(desktop)]
+fn tray_menu(app: &AppHandle, language: &str) -> tauri::Result<Menu<tauri::Wry>> {
+    let english = language == "en";
+    let show = MenuItem::with_id(app, "show", if english { "Show" } else { "Показать" }, true, None::<&str>)?;
+    let hide = MenuItem::with_id(app, "hide", if english { "Hide to tray" } else { "Скрыть в трей" }, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", if english { "Quit" } else { "Выход" }, true, None::<&str>)?;
+    Menu::with_items(app, &[&show, &hide, &quit])
+}
+
+#[cfg(desktop)]
+pub(crate) fn refresh_tray_language(app: &AppHandle, language: &str) -> tauri::Result<()> {
+    if let Some(tray) = app.tray_by_id("main") {
+        tray.set_menu(Some(tray_menu(app, language)?))?;
+    }
+    Ok(())
+}
+
+#[cfg(desktop)]
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Показать", true, None::<&str>)?;
-    let hide = MenuItem::with_id(app, "hide", "Скрыть в трей", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+    let language = settings::load(app).map(|settings| settings.language).unwrap_or_else(|_| "ru".into());
+    let menu = tray_menu(app, &language)?;
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())

@@ -81,17 +81,17 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
             startSequence
         }
 
-        fun awaitStart(token: Long, timeoutMillis: Long): String? = synchronized(startMonitor) {
+        fun awaitStart(context: Context, token: Long, timeoutMillis: Long): String? = synchronized(startMonitor) {
             val deadline = System.currentTimeMillis() + timeoutMillis
             while (completedStart < token) {
                 val remaining = deadline - System.currentTimeMillis()
                 if (remaining <= 0) {
-                    return@synchronized "VPN не запустился за ${timeoutMillis / 1000} с"
+                    return@synchronized UiLanguage.text(context, com.unigate.app.R.string.vpn_timeout, timeoutMillis / 1000)
                 }
                 startMonitor.wait(remaining)
             }
             if (completedStart > token) {
-                "Запуск VPN был заменён более новым запросом"
+                UiLanguage.text(context, com.unigate.app.R.string.vpn_replaced)
             } else {
                 startFailure
             }
@@ -153,7 +153,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
             .ifBlank { saved?.profileName ?: "UniGate" }
         liveState = VpnQuickControl.State.CONNECTING
         VpnQuickControl.setState(this, VpnQuickControl.State.CONNECTING)
-        showForeground("Подключение…")
+        showForeground(UiLanguage.text(this, com.unigate.app.R.string.vpn_connecting))
         val startToken = intent?.getLongExtra(EXTRA_START_TOKEN, 0L) ?: 0L
         val includePackages =
             intent?.getStringArrayListExtra(EXTRA_INCLUDE_PACKAGES) ?: saved?.includePackages.orEmpty()
@@ -168,7 +168,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
                 finishStart(startToken, null)
                 liveState = VpnQuickControl.State.ON
                 VpnQuickControl.setState(this, VpnQuickControl.State.ON)
-                showForeground("VPN подключён")
+                showForeground(UiLanguage.text(this, com.unigate.app.R.string.vpn_connected))
             }.onFailure {
                 val error = it.diagnosticMessage()
                 Log.e("UniGateVpnService", "VPN startup failed", it)
@@ -176,7 +176,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
                 liveState = VpnQuickControl.State.OFF
                 VpnQuickControl.setShouldReconnect(this, false)
                 VpnQuickControl.setState(this, VpnQuickControl.State.OFF)
-                showForeground("Ошибка VPN: $error")
+                showForeground(UiLanguage.text(this, com.unigate.app.R.string.vpn_error, error))
                 stopVpn()
             }
         }.start()

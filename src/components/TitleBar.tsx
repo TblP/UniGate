@@ -1,16 +1,18 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useI18n } from "../lib/i18n";
 
 /**
  * Кастомная шапка окна (окно запущено без нативной рамки, `decorations: false`).
  * Без иконки и названия — только область перетаскивания и кнопки свернуть/закрыть.
  */
 export function TitleBar() {
+  const { t } = useI18n();
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-controls">
         <button
           className="titlebar-btn"
-          title="Свернуть"
+          title={t("common.minimize")}
           onClick={() => getCurrentWindow().minimize()}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
@@ -19,7 +21,7 @@ export function TitleBar() {
         </button>
         <button
           className="titlebar-btn close"
-          title="Закрыть"
+          title={t("common.close")}
           onClick={() => getCurrentWindow().close()}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">

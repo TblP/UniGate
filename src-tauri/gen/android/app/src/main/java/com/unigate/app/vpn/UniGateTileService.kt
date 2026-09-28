@@ -40,9 +40,9 @@ class UniGateTileService : TileService() {
             VpnQuickControl.State.CONNECTING -> Tile.STATE_UNAVAILABLE
             VpnQuickControl.State.ON -> Tile.STATE_ACTIVE
         }
-        tile.label = getString(R.string.tile_label)
+        tile.label = UiLanguage.text(this, R.string.tile_label)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = getString(
+            tile.subtitle = UiLanguage.text(this,
                 when (state) {
                     VpnQuickControl.State.OFF -> R.string.widget_off
                     VpnQuickControl.State.CONNECTING -> R.string.widget_connecting
