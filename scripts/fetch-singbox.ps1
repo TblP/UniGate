@@ -9,7 +9,7 @@
   macOS/Linux-варианты появятся вместе с поддержкой этих ОС (Phase 10).
 #>
 param(
-  [string]$Version = "1.14.0",
+  [string]$Version = "1.14.4",
   [string]$Triple  = "x86_64-pc-windows-msvc"
 )
 
@@ -17,12 +17,13 @@ $ErrorActionPreference = "Stop"
 $root    = Split-Path -Parent $PSScriptRoot
 $binDir  = Join-Path $root "src-tauri\binaries"
 $dest    = Join-Path $binDir "sing-box-$Triple.exe"
+$cronetDest = Join-Path $binDir "libcronet.dll"
 
 $downloadSingBox = $true
 if (Test-Path $dest) {
   $existing = & $dest version 2>$null | Select-Object -First 1
   Write-Host "sing-box уже на месте: $existing"
-  if ($existing -match [regex]::Escape($Version)) {
+  if ($existing -eq "sing-box version $Version" -and (Test-Path $cronetDest)) {
     $downloadSingBox = $false
   } else {
     Write-Host "Версия отличается от $Version — перекачиваю."
@@ -43,14 +44,19 @@ if ($downloadSingBox) {
 
   $exe = Get-ChildItem -Path $ext -Recurse -Filter "sing-box.exe" | Select-Object -First 1
   if (-not $exe) { throw "sing-box.exe не найден в архиве" }
+  $cronet = Join-Path $exe.DirectoryName "libcronet.dll"
+  if (-not (Test-Path -LiteralPath $cronet)) { throw "libcronet.dll не найдена в архиве sing-box" }
 
   New-Item -ItemType Directory -Force -Path $binDir | Out-Null
   Copy-Item $exe.FullName $dest -Force
+  Copy-Item -LiteralPath $cronet -Destination $cronetDest -Force
   Remove-Item $tmp, $ext -Recurse -Force
 
   Write-Host "Готово: $dest"
   & $dest version | Select-Object -First 1
 }
+
+& (Join-Path $PSScriptRoot "fetch-xray.ps1")
 
 # --- wintun.dll (нужен sing-box для TUN-режима на Windows) ---
 $wintunVersion = "0.14.1"

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { ProfileQr } from "../components/ProfileQr";
+import { Format, requestPermissions, scan } from "@tauri-apps/plugin-barcode-scanner";
 import { ipc } from "../lib/ipc";
 import { formatBytes, formatSpeed } from "../lib/format";
 import type {
@@ -12,7 +14,7 @@ import type {
   Theme,
 } from "../lib/types";
 import { useAppStore } from "../store/useAppStore";
-import { ImportDialog } from "../features/profiles/ImportDialog";
+import { VpnImportDialog } from "../features/profiles/VpnImportDialog";
 import { ProfileForm } from "../features/profiles/ProfileForm";
 import { UpdateButton } from "../components/UpdateButton";
 import { displayError, useI18n } from "../lib/i18n";
@@ -52,6 +54,7 @@ const PROTOCOL_LABEL: Record<Outbound["type"], string> = {
   trojan: "Trojan",
   vless: "VLESS",
   vmess: "VMess",
+  naive: "NaïveProxy",
   tuic: "TUIC",
   amnezia_wg: "AmneziaWG",
 };
@@ -264,12 +267,12 @@ function MobileConnection() {
         </label>
         <div className="mobile-row mobile-server-actions">
           <button className="mobile-secondary-button" onClick={() => setEditor("import")}>
-            <Icon name="download" size={19} />
-            {t("common.import")}
+            <Icon name="plus" size={19} />
+            VPN
           </button>
           <button className="mobile-secondary-button" onClick={() => setEditor("create")}>
             <Icon name="plus" size={19} />
-            {t("common.add")}
+            {t("vpn.proxy")}
           </button>
         </div>
       </section>
@@ -349,11 +352,23 @@ function MobileConnection() {
 
       {editor && (
         <Modal
-          title={editor === "import" ? t("connection.importProfile") : t("connection.newProfile")}
+          title={editor === "import" ? t("vpn.importMode") : t("connection.newProfile")}
           onClose={() => setEditor(null)}
         >
           {editor === "import" ? (
-            <ImportDialog onDone={() => setEditor(null)} onCancel={() => setEditor(null)} />
+            <VpnImportDialog
+              onDone={() => setEditor(null)}
+              onCancel={() => setEditor(null)}
+              scanQr={async () => {
+                if (await requestPermissions() !== "granted") throw new Error("Camera permission denied");
+                try {
+                  return (await scan({ formats: [Format.QRCode] })).content;
+                } catch (error) {
+                  if (/cancel/i.test(String(error))) return null;
+                  throw error;
+                }
+              }}
+            />
           ) : (
             <ProfileForm onSubmit={create} onCancel={() => setEditor(null)} />
           )}
@@ -362,13 +377,16 @@ function MobileConnection() {
 
       {shareText !== null && (
         <Modal title={t("connection.shareProfile")} onClose={() => setShareText(null)}>
-          <textarea className="mobile-share-text" readOnly value={shareText} rows={7} />
-          <button
-            className="mobile-connect-button"
-            onClick={() => void navigator.clipboard.writeText(shareText)}
-          >
-            {t("common.copy")}
-          </button>
+          <div className="mobile-share-content">
+            <textarea className="mobile-share-text" readOnly value={shareText} rows={7} />
+            {/^[a-z][a-z0-9+.-]*:\/\//i.test(shareText) && <ProfileQr value={shareText} t={t} />}
+            <button
+              className="mobile-connect-button"
+              onClick={() => void navigator.clipboard.writeText(shareText)}
+            >
+              {t("common.copy")}
+            </button>
+          </div>
         </Modal>
       )}
     </div>

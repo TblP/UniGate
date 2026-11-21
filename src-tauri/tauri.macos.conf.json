@@ -3,6 +3,7 @@
   "bundle": {
     "externalBin": [
       "binaries/sing-box",
+      "binaries/xray",
       "binaries/awg-shim"
     ],
     "resources": {

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const EVENT: &str = "connection-state";
 const AWG_SHIM_PORT: u16 = 2081;
+const XRAY_SHIM_PORT: u16 = 2082;
 
 pub struct Connection(pub Mutex<ConnectionState>);
 
@@ -29,6 +30,7 @@ struct VpnPlugin<R: Runtime>(PluginHandle<R>);
 struct StartRequest {
     config: String,
     awg_config: Option<String>,
+    xray_config: Option<String>,
     profile_name: String,
     include_packages: Vec<String>,
     exclude_packages: Vec<String>,
@@ -173,9 +175,41 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         .into_iter()
         .find(|profile| profile.id == profile_id)
         .ok_or_else(|| "Профиль не найден".to_string())?;
-
-    set_state(&app, ConnectionState::Connecting);
     let app_settings = settings::load(&app)?;
+    let mut generated_profile = profile.clone();
+    set_state(&app, ConnectionState::Connecting);
+    let xray_config = if profile.outbound.uses_xhttp() {
+        let shim = async {
+            let Outbound::Vless { server, port, .. } = &profile.outbound else {
+                return Err("Ожидался профиль VLESS + XHTTP".to_string());
+            };
+            let (server, port) = (server.trim_matches(['[', ']']).to_owned(), *port);
+            let ip = tauri::async_runtime::spawn_blocking(move || {
+                use std::net::ToSocketAddrs;
+                (server.as_str(), port).to_socket_addrs().ok()?.next().map(|addr| addr.ip())
+            })
+            .await
+            .ok()
+            .flatten()
+            .ok_or("Не удалось определить IP XHTTP-сервера до запуска TUN")?;
+            let password = uuid::Uuid::new_v4().to_string();
+            let shim = config::xray_xhttp_tun_shim(&profile.outbound, XRAY_SHIM_PORT, ip, &password)?;
+            Ok((shim, password))
+        }
+        .await;
+        let (shim, password) = shim.inspect_err(|message| {
+            set_state(&app, ConnectionState::Error { message: message.clone() });
+        })?;
+        generated_profile.outbound = Outbound::Socks {
+            server: "127.0.0.1".into(),
+            port: XRAY_SHIM_PORT,
+            username: Some("unigate".into()),
+            password: Some(password),
+        };
+        Some(shim.to_string())
+    } else {
+        None
+    };
 
     // Android performs per-app split at VpnService.Builder level using package
     // identifiers. Disable desktop process_name rules in the sing-box config.
@@ -212,7 +246,6 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         Outbound::AmneziaWg { config, .. } => Some(config.clone()),
         _ => None,
     };
-    let mut generated_profile = profile.clone();
     if awg_config.is_some() {
         generated_profile.outbound = Outbound::Socks {
             server: "127.0.0.1".into(),
@@ -221,7 +254,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
             password: None,
         };
     }
-    let config = config::generate(
+    let mut config = config::generate(
         &generated_profile,
         Mode::Tun,
         0,
@@ -231,6 +264,9 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         false,
         TunStack::Gvisor,
     );
+    if xray_config.is_some() {
+        config::force_tcp_proxy(&mut config);
+    }
     let config = serde_json::to_string(&config)
         .map_err(|error| format!("Не удалось создать Android-конфиг: {error}"))?;
 
@@ -272,6 +308,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     let request = StartRequest {
         config,
         awg_config,
+        xray_config,
         profile_name: profile.name,
         include_packages,
         exclude_packages,

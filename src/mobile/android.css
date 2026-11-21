@@ -1116,18 +1116,26 @@
 
 .mobile-share-text {
   min-height: 145px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11px;
+}
+
+.mobile-share-content {
+  display: grid;
+  gap: 16px;
 }
 
 /* Shared profile/import forms inside Android bottom sheets. */
 .android-root .profile-form {
   display: flex;
   flex-direction: column;
-  gap: 13px;
+  gap: 16px;
 }
+
+.android-root .mobile-sheet-content .profile-actions { gap: 10px; }
+.android-root .mobile-sheet-content .profile-form > .profile-actions { margin-top: 4px; }
 
 .android-root .profile-form > label,
 .android-root .profile-form .advanced label {

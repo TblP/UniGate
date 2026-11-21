@@ -19,32 +19,67 @@ pub fn save_all(app: &AppHandle, subs: &[Subscription]) -> Result<(), String> {
 }
 
 /// Скачивает тело подписки по URL.
-pub async fn fetch(url: &str) -> Result<String, String> {
+///
+/// Новые подписки — только HTTPS. `allow_legacy_http` = подписка сохранена
+/// до 1.2.3, когда http:// ещё принимался: такие продолжают обновляться,
+/// иначе пользователю пришлось бы удалять подписку вместе с её профилями.
+pub async fn fetch(url: &str, allow_legacy_http: bool) -> Result<String, String> {
+    const MAX_BYTES: usize = 2 * 1024 * 1024;
+    let url = reqwest::Url::parse(url).map_err(|_| "неверный URL подписки")?;
+    let scheme_ok = url.scheme() == "https" || (allow_legacy_http && url.scheme() == "http");
+    if !scheme_ok || url.host_str().is_none()
+        || !url.username().is_empty() || url.password().is_some()
+    {
+        return Err("для подписки нужна HTTPS-ссылка без логина и пароля в адресе".into());
+    }
     let client = reqwest::Client::builder()
         .user_agent("UniGate")
+        .https_only(url.scheme() == "https")
+        .timeout(std::time::Duration::from_secs(20))
         .build()
-        .map_err(|e| format!("http-клиент: {e}"))?;
-    let resp = client
+        .map_err(|_| "не удалось создать HTTP-клиент")?;
+    // Причину ошибки (DNS/TLS/таймаут) показываем, но без URL: в нём
+    // у подписок обычно секретный токен.
+    let mut resp = client
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("не удалось загрузить подписку: {e}"))?;
+        .map_err(|e| format!("не удалось загрузить подписку: {}", e.without_url()))?;
     if !resp.status().is_success() {
         return Err(format!("подписка вернула статус {}", resp.status()));
     }
-    resp.text()
+    let mut bytes = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
         .await
-        .map_err(|e| format!("не удалось прочитать подписку: {e}"))
+        .map_err(|e| format!("не удалось прочитать подписку: {}", e.without_url()))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_BYTES {
+            return Err("ответ подписки слишком большой".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|_| "ответ подписки не в формате UTF-8".into())
 }
 
 /// Разбирает тело подписки в список `(имя, outbound)`; нераспознанные строки пропускает.
-pub fn parse_list(body: &str) -> Vec<(String, Outbound)> {
-    decode_maybe_base64(body)
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .filter_map(|l| import::parse(l).ok())
-        .collect()
+pub fn parse_list(body: &str) -> (Vec<(String, Outbound)>, usize) {
+    let mut servers = Vec::new();
+    let mut skipped = 0;
+    for line in decode_maybe_base64(body).trim_start_matches('\u{feff}').lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') || line.starts_with("//") { continue; }
+        if !line.split_once("://").is_some_and(|(scheme, _)| {
+            !scheme.is_empty() && scheme.bytes().all(|c| c.is_ascii_alphanumeric() || b"+.-".contains(&c))
+        }) {
+            skipped += 1;
+            continue;
+        }
+        match import::parse(line) {
+            Ok(server) => servers.push(server),
+            Err(_) => skipped += 1,
+        }
+    }
+    (servers, skipped)
 }
 
 /// Если всё тело — base64 со ссылками, декодирует; иначе возвращает как есть.
@@ -70,9 +105,11 @@ mod tests {
     fn parse_plain_list() {
         let body = "hysteria2://pw@1.2.3.4:443?sni=ex.com#A\n\
                     trojan://secret@ex.com:443?sni=ex.com#B\n\
-                    # комментарий (не ссылка)\n";
-        let list = parse_list(body);
+                    # комментарий (не ссылка)\n\
+                    unsupported://one\n";
+        let (list, skipped) = parse_list(body);
         assert_eq!(list.len(), 2);
+        assert_eq!(skipped, 1);
         assert_eq!(list[0].0, "A");
         assert_eq!(list[1].0, "B");
     }
@@ -81,8 +118,9 @@ mod tests {
     fn parse_base64_list() {
         let inner = "vless://11111111-1111-1111-1111-111111111111@1.2.3.4:443?security=tls&sni=ex.com&type=tcp#Node1\nss://YWVzLTI1Ni1nY206cGFzcw@1.2.3.4:8388#Node2";
         let b64 = general_purpose::STANDARD.encode(inner);
-        let list = parse_list(&b64);
+        let (list, skipped) = parse_list(&b64);
         assert_eq!(list.len(), 2);
+        assert_eq!(skipped, 0);
         assert_eq!(list[0].0, "Node1");
         assert_eq!(list[1].0, "Node2");
     }

@@ -155,6 +155,8 @@ pub fn run() {
     ));
     #[cfg(mobile)]
     let builder = builder.plugin(connection::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     let builder = builder.manage(Connection::new()).setup(|app| {
         // Windows + «запуск от администратора»: обычный запуск редиректим
         // через задачу планировщика (элевация без UAC) и выходим

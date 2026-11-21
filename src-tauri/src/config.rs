@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 /// Порт локального Clash API (статистика трафика). Phase 5.
 pub const CLASH_API_PORT: u16 = 9090;
+pub const XRAY_TRAFFIC_TAG: &str = "unigate-xhttp";
 
 /// Полный конфиг sing-box по режиму. `geoip_ru` — путь к geoip-ru.srs (для RU-обхода).
 /// `bootstrap_ips` — заранее разрезолвленные IP домена сервера (macOS TUN,
@@ -81,6 +82,7 @@ pub fn server_domain(outbound: &Outbound) -> Option<&str> {
         | Outbound::Trojan { server, .. }
         | Outbound::Vless { server, .. }
         | Outbound::Vmess { server, .. }
+        | Outbound::Naive { server, .. }
         | Outbound::Tuic { server, .. }
         | Outbound::AmneziaWg { server, .. } => server,
     };
@@ -553,6 +555,15 @@ fn outbound_to_json(outbound: &Outbound) -> Value {
             apply_transport(&mut v, transport);
             v
         }
+        Outbound::Naive { server, port, username, password } => json!({
+            "type": "naive",
+            "tag": "proxy",
+            "server": server,
+            "server_port": port,
+            "username": username,
+            "password": password,
+            "tls": { "enabled": true }
+        }),
         Outbound::Tuic {
             server,
             port,
@@ -612,10 +623,90 @@ fn apply_tls(v: &mut Value, tls: &TlsOpts) {
     v["tls"] = t;
 }
 
+pub fn enable_xray_traffic(config: &mut Value) {
+    config["outbounds"][0]["tag"] = json!(XRAY_TRAFFIC_TAG);
+    config["stats"] = json!({});
+    config["policy"]["system"] = json!({
+        "statsOutboundUplink": true,
+        "statsOutboundDownlink": true,
+    });
+    // The two cores are mutually exclusive within a session.
+    config["metrics"] = json!({ "listen": format!("127.0.0.1:{CLASH_API_PORT}") });
+}
+
+pub fn xray_xhttp(outbound: &Outbound, local_port: u16) -> Result<Value, String> {
+    let Outbound::Vless {
+        server, port, uuid, flow: None, tls,
+        transport: Some(Transport::Xhttp { path, host, mode, extra }),
+    } = outbound else {
+        return Err("Ожидался профиль VLESS + TLS + XHTTP".into());
+    };
+    if !tls.enabled || tls.reality_public_key.is_some() {
+        return Err("Для XHTTP в этой сборке UniGate нужен TLS".into());
+    }
+    let mut transport = json!({});
+    for (key, value) in [("path", path), ("host", host), ("mode", mode)] {
+        if let Some(value) = value { transport[key] = json!(value); }
+    }
+    if let Some(extra) = extra { transport["extra"] = extra.clone(); }
+    let mut tls_settings = json!({ "allowInsecure": tls.insecure });
+    if let Some(sni) = &tls.sni { tls_settings["serverName"] = json!(sni); }
+    if let Some(fp) = &tls.fingerprint { tls_settings["fingerprint"] = json!(fp); }
+    if !tls.alpn.is_empty() { tls_settings["alpn"] = json!(tls.alpn); }
+    Ok(json!({
+        "log": { "loglevel": "warning", "access": "none" },
+        "inbounds": [{
+            "listen": "127.0.0.1", "port": local_port, "protocol": "socks",
+            "settings": { "auth": "noauth", "udp": false }
+        }],
+        "outbounds": [{
+            "protocol": "vless",
+            "settings": { "vnext": [{ "address": server, "port": port, "users": [{"id": uuid, "encryption": "none"}] }] },
+            "streamSettings": { "network": "xhttp", "security": "tls", "xhttpSettings": transport, "tlsSettings": tls_settings }
+        }]
+    }))
+}
+
+/// Xray-шим XHTTP поднимает SOCKS без UDP: proxy-outbound sing-box
+/// ограничиваем TCP, иначе UDP-сессии уходили бы в шим и висели.
+pub fn force_tcp_proxy(config: &mut Value) {
+    if let Some(proxy) = config["outbounds"]
+        .as_array_mut()
+        .and_then(|outbounds| outbounds.iter_mut().find(|outbound| outbound["tag"] == "proxy"))
+    {
+        proxy["network"] = json!("tcp");
+    }
+}
+
+pub fn xray_xhttp_tun_shim(
+    outbound: &Outbound,
+    port: u16,
+    ip: std::net::IpAddr,
+    password: &str,
+) -> Result<Value, String> {
+    let mut cfg = xray_xhttp(outbound, port)?;
+    let stream = &mut cfg["outbounds"][0]["streamSettings"];
+    if stream.pointer("/xhttpSettings/extra/downloadSettings").is_some_and(|v| !v.is_null()) {
+        return Err("XHTTP с отдельным адресом загрузки пока доступен только в режиме прокси".into());
+    }
+    let Outbound::Vless { server, .. } = outbound else { unreachable!() };
+    if stream["tlsSettings"].get("serverName").is_none() {
+        stream["tlsSettings"]["serverName"] = json!(server);
+    }
+    cfg["outbounds"][0]["settings"]["vnext"][0]["address"] = json!(ip.to_string());
+    cfg["inbounds"][0]["settings"] = json!({
+        "auth": "password",
+        "accounts": [{ "user": "unigate", "pass": password }],
+        "udp": false
+    });
+    Ok(cfg)
+}
+
 /// Добавляет в outbound объект `transport`, если он задан (ws/grpc).
 fn apply_transport(v: &mut Value, transport: &Option<Transport>) {
     let Some(transport) = transport else { return };
     v["transport"] = match transport {
+        Transport::Xhttp { .. } => json!({ "type": "xhttp" }),
         Transport::Ws { path, host } => {
             let mut t = json!({ "type": "ws" });
             if let Some(p) = path {

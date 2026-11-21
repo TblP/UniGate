@@ -3,8 +3,10 @@ import { useAppStore } from "../../store/useAppStore";
 import { ipc } from "../../lib/ipc";
 import type { Outbound, Profile } from "../../lib/types";
 import { ProfileForm } from "./ProfileForm";
-import { ImportDialog } from "./ImportDialog";
+import { VpnImportDialog } from "./VpnImportDialog";
 import { displayError, useI18n } from "../../lib/i18n";
+import { ProfileQr } from "../../components/ProfileQr";
+import { ProfileEditorModal } from "../../components/ProfileEditorModal";
 
 function outboundSummary(o: Outbound): string {
   const addr = `${o.server}:${o.port}`;
@@ -23,6 +25,8 @@ function outboundSummary(o: Outbound): string {
       return `VLESS · ${addr}`;
     case "vmess":
       return `VMess · ${addr}`;
+    case "naive":
+      return "NaïveProxy";
     case "tuic":
       return `TUIC · ${addr}`;
     case "amnezia_wg":
@@ -125,10 +129,10 @@ export function ProfilesPanel() {
     <section className="core-card">
       <div className="panel-head">
         <h2>{t("profiles.title")}</h2>
-        {!editor && (
+        {editor?.mode !== "edit" && (
           <div className="panel-head-actions">
-            <button onClick={() => setEditor({ mode: "import" })}>{t("common.import")}</button>
-            <button onClick={() => setEditor({ mode: "create" })}>+ {t("common.add")}</button>
+            <button onClick={() => setEditor({ mode: "import" })}>+ VPN</button>
+            <button onClick={() => setEditor({ mode: "create" })}>+ {t("vpn.proxy")}</button>
           </div>
         )}
       </div>
@@ -161,6 +165,7 @@ export function ProfilesPanel() {
             rows={shared.format === "json" ? 8 : 3}
             value={shared.content}
           />
+          {shared.format === "link" && <ProfileQr key={shared.id} value={shared.content} t={t} />}
           <button
             type="button"
             onClick={() => navigator.clipboard.writeText(shared.content)}
@@ -170,11 +175,19 @@ export function ProfilesPanel() {
         </div>
       )}
 
-      {editor?.mode === "import" ? (
-        <ImportDialog onDone={() => setEditor(null)} onCancel={() => setEditor(null)} />
-      ) : editor ? (
+      {editor && editor.mode !== "edit" && (
+        <ProfileEditorModal title={editor.mode === "import" ? "+ VPN" : `+ ${t("vpn.proxy")}`} onClose={() => setEditor(null)}>
+          {editor.mode === "import" ? (
+            <VpnImportDialog onDone={() => setEditor(null)} onCancel={() => setEditor(null)} />
+          ) : (
+            <ProfileForm onSubmit={handleSubmit} onCancel={() => setEditor(null)} />
+          )}
+        </ProfileEditorModal>
+      )}
+
+      {editor?.mode === "edit" ? (
         <ProfileForm
-          initial={editor.mode === "edit" ? editor.profile : undefined}
+          initial={editor.profile}
           onSubmit={handleSubmit}
           onCancel={() => setEditor(null)}
         />

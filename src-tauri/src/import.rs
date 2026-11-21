@@ -46,6 +46,7 @@ fn from_link(s: &str) -> Result<(String, Outbound), String> {
         "vless" => parse_vless(&url),
         "trojan" => parse_trojan(&url),
         "tuic" => parse_tuic(&url),
+        "naive+https" => parse_naive(&url),
         other => Err(format!(
             "протокол ссылки «{other}» пока не поддерживается"
         )),
@@ -82,6 +83,26 @@ fn parse_vless(url: &Url) -> Result<(String, Outbound), String> {
     let port = url.port().unwrap_or(443);
     let uuid = decode(url.username());
     let p = params_of(url);
+    let transport = if p.get("type").is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "xhttp" | "splithttp")) {
+        if !p.get("security").is_some_and(|s| s.eq_ignore_ascii_case("tls"))
+            || p.get("encryption").is_some_and(|s| s != "none")
+            || p.get("flow").is_some_and(non_empty)
+        {
+            return Err("Поддерживается VLESS + TLS + XHTTP без VLESS Encryption и flow".into());
+        }
+        let extra = p.get("extra").filter(|s| !s.is_empty()).map(|s| {
+            serde_json::from_str::<Value>(s).ok().filter(Value::is_object)
+                .ok_or("Некорректный параметр XHTTP extra")
+        }).transpose()?;
+        Some(Transport::Xhttp {
+            path: p.get("path").cloned().filter(non_empty),
+            host: p.get("host").cloned().filter(non_empty),
+            mode: p.get("mode").cloned().filter(non_empty),
+            extra,
+        })
+    } else {
+        build_transport(&p)
+    };
 
     Ok((
         name_of(url, || format!("VLESS {server}")),
@@ -91,7 +112,7 @@ fn parse_vless(url: &Url) -> Result<(String, Outbound), String> {
             uuid,
             flow: p.get("flow").cloned().filter(non_empty),
             tls: build_tls(&p, true),
-            transport: build_transport(&p),
+            transport,
         },
     ))
 }
@@ -111,6 +132,22 @@ fn parse_trojan(url: &Url) -> Result<(String, Outbound), String> {
             tls: build_tls(&p, true),
             transport: build_transport(&p),
         },
+    ))
+}
+
+fn parse_naive(url: &Url) -> Result<(String, Outbound), String> {
+    let server = host_of(url)?;
+    let username = decode(url.username());
+    let password = decode(url.password().unwrap_or_default());
+    if username.is_empty() || password.is_empty() {
+        return Err("Для NaïveProxy нужны логин и пароль".into());
+    }
+    if !matches!(url.path(), "" | "/") || url.query().is_some() {
+        return Err("Поддерживается базовая ссылка naive+https без пути и параметров".into());
+    }
+    Ok((
+        name_of(url, || format!("NaïveProxy {server}")),
+        Outbound::Naive { server, port: url.port().unwrap_or(443), username, password },
     ))
 }
 
@@ -358,6 +395,12 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
             let node = vnext_first(settings)?;
             let user = users_first(node)?;
             let (tls, transport) = xray_stream(stream);
+            if matches!(transport.as_ref(), Some(Transport::Xhttp { .. }))
+                && (!tls.enabled || tls.reality_public_key.is_some() ||
+                    xopt(user, "flow").is_some() || xopt(user, "encryption").is_some_and(|s| s != "none"))
+            {
+                return Err("Поддерживается VLESS + TLS + XHTTP без VLESS Encryption и flow".into());
+            }
             Ok(Outbound::Vless {
                 server: xstr(node, "address"),
                 port: xport(node),
@@ -370,7 +413,7 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         "vmess" => {
             let node = vnext_first(settings)?;
             let user = users_first(node)?;
-            let (tls, transport) = xray_stream(stream);
+            let (tls, transport) = xray_stream_no_xhttp(stream, "VMess")?;
             Ok(Outbound::Vmess {
                 server: xstr(node, "address"),
                 port: xport(node),
@@ -383,7 +426,7 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         }
         "trojan" => {
             let srv = servers_first(settings)?;
-            let (tls, transport) = xray_stream(stream);
+            let (tls, transport) = xray_stream_no_xhttp(stream, "Trojan")?;
             Ok(Outbound::Trojan {
                 server: xstr(srv, "address"),
                 port: xport(srv),
@@ -394,6 +437,7 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         }
         "shadowsocks" => {
             let srv = servers_first(settings)?;
+            xray_stream_no_xhttp(stream, "Shadowsocks")?;
             Ok(Outbound::Shadowsocks {
                 server: xstr(srv, "address"),
                 port: xport(srv),
@@ -403,6 +447,19 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         }
         other => Err(format!("xray: протокол «{other}» пока не поддержан")),
     }
+}
+
+/// XHTTP поддерживается только для VLESS (через Xray); sing-box его не знает,
+/// поэтому для остальных протоколов отклоняем импорт сразу, а не падением ядра.
+fn xray_stream_no_xhttp(
+    stream: Option<&Value>,
+    proto: &str,
+) -> Result<(TlsOpts, Option<Transport>), String> {
+    let (tls, transport) = xray_stream(stream);
+    if matches!(transport, Some(Transport::Xhttp { .. })) {
+        return Err(format!("XHTTP поддерживается только для VLESS, не для {proto}"));
+    }
+    Ok((tls, transport))
 }
 
 /// streamSettings Xray → (TlsOpts, Transport).
@@ -426,6 +483,9 @@ fn xray_stream(stream: Option<&Value>) -> (TlsOpts, Option<Transport>) {
             tls.enabled = true;
             tls.sni = t.and_then(|x| xopt(x, "serverName"));
             tls.fingerprint = t.and_then(|x| xopt(x, "fingerprint"));
+            tls.alpn = t.and_then(|x| x.get("alpn")).and_then(Value::as_array)
+                .map(|list| list.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default();
             tls.insecure = t
                 .and_then(|x| x.get("allowInsecure"))
                 .and_then(Value::as_bool)
@@ -436,6 +496,15 @@ fn xray_stream(stream: Option<&Value>) -> (TlsOpts, Option<Transport>) {
 
     let network = stream.get("network").and_then(|v| v.as_str()).unwrap_or("tcp");
     let transport = match network {
+        "xhttp" | "splithttp" => {
+            let x = stream.get("xhttpSettings").or_else(|| stream.get("splithttpSettings"));
+            Some(Transport::Xhttp {
+                path: x.and_then(|x| xopt(x, "path")),
+                host: x.and_then(|x| xopt(x, "host")),
+                mode: x.and_then(|x| xopt(x, "mode")),
+                extra: x.and_then(|x| x.get("extra")).filter(|v| v.is_object()).cloned(),
+            })
+        }
         "ws" => {
             let ws = stream.get("wsSettings");
             Some(Transport::Ws {
@@ -512,6 +581,15 @@ fn awg_endpoint(conf: &str) -> Option<(String, u16)> {
 
 fn from_json(s: &str) -> Result<(String, Outbound), String> {
     let value: Value = serde_json::from_str(s).map_err(|e| format!("JSON не распознан: {e}"))?;
+    if value.get("outbounds").and_then(Value::as_array).is_some_and(|list| {
+        list.iter().any(|ob| ob.get("protocol").is_some())
+    }) {
+        let outbound = xray_to_outbound(&value)?;
+        if outbound.uses_xhttp() {
+            return Ok(("VLESS XHTTP".into(), outbound));
+        }
+        return Err("Импорт полного Xray JSON доступен только для VLESS + TLS + XHTTP".into());
+    }
 
     let ob = if let Some(arr) = value.get("outbounds").and_then(|v| v.as_array()) {
         arr.iter()
@@ -536,6 +614,9 @@ fn from_json(s: &str) -> Result<(String, Outbound), String> {
 }
 
 fn outbound_from_singbox(o: &Value) -> Result<Outbound, String> {
+    if o.pointer("/transport/type").and_then(Value::as_str) == Some("xhttp") {
+        return Err("Для XHTTP используйте ссылку VLESS или конфиг Xray".into());
+    }
     let kind = o
         .get("type")
         .and_then(|v| v.as_str())
@@ -545,6 +626,24 @@ fn outbound_from_singbox(o: &Value) -> Result<Outbound, String> {
     let opt = |name: &str| o.get(name).and_then(|v| v.as_str()).map(String::from).filter(non_empty);
 
     match kind {
+        "naive" => {
+            let username = req_str(o, "username");
+            let password = req_str(o, "password");
+            let port = o.get("server_port").and_then(Value::as_u64)
+                .and_then(|p| u16::try_from(p).ok()).filter(|p| *p != 0)
+                .ok_or("Для NaïveProxy нужен действительный порт")?;
+            if server.is_empty() || username.is_empty() || password.is_empty() {
+                return Err("Для NaïveProxy нужны сервер, логин и пароль".into());
+            }
+            if o.get("quic").and_then(Value::as_bool) == Some(true)
+                || o.get("tls").is_some_and(|tls| tls != &serde_json::json!({ "enabled": true }))
+                || o.get("extra_headers").is_some()
+                || o.get("udp_over_tcp").is_some()
+            {
+                return Err("Поддерживается базовый NaïveProxy поверх HTTPS".into());
+            }
+            Ok(Outbound::Naive { server, port, username, password })
+        }
         "hysteria2" => {
             let tls = o.get("tls");
             Ok(Outbound::Hysteria2 {
@@ -949,6 +1048,23 @@ mod tests {
         ] {
             assert!(config.contains(field), "missing {field}");
         }
+    }
+
+    #[test]
+    fn xray_xhttp_rejected_for_non_vless() {
+        let vmess = serde_json::json!({ "outbounds": [{
+            "protocol": "vmess",
+            "settings": { "vnext": [{ "address": "ex.com", "port": 443,
+                "users": [{ "id": "11111111-1111-1111-1111-111111111111" }] }] },
+            "streamSettings": { "network": "xhttp", "security": "tls" }
+        }]});
+        assert!(xray_to_outbound(&vmess).is_err());
+        let trojan = serde_json::json!({ "outbounds": [{
+            "protocol": "trojan",
+            "settings": { "servers": [{ "address": "ex.com", "port": 443, "password": "p" }] },
+            "streamSettings": { "network": "splithttp", "security": "tls" }
+        }]});
+        assert!(xray_to_outbound(&trojan).is_err());
     }
 
     #[test]

@@ -1,5 +1,9 @@
 {
   "ru": {
+    "subscriptions.qrHttpsRequired": "В QR-коде должна быть HTTPS-ссылка подписки.",
+    "vpn.proxy": "Прокси", "vpn.importMode": "Добавить VPN", "subscriptions.skipped": "пропущено: {count}", "subscriptions.confirmDelete": "Удалить подписку «{name}» и её серверы?",
+    "profiles.scanQr": "Сканировать QR", "profiles.qrScanError": "Не удалось прочитать QR-код. Проверьте доступ к камере или вставьте ссылку вручную.",
+    "share.qrShow": "Показать QR", "share.qrHide": "Скрыть QR", "share.qrTitle": "QR-код профиля", "share.qrSecret": "QR-код может содержать пароль. Не публикуйте его.", "share.qrTooLong": "Ссылка слишком длинная для QR-кода. Скопируйте её.",
     "nav.connection": "Подключение", "nav.routing": "Маршрутизация", "nav.settings": "Настройки", "nav.subscriptions": "Подписки",
     "common.loading": "Загрузка…", "common.add": "Добавить", "common.import": "Импорт", "common.share": "Поделиться", "common.delete": "Удалить", "common.copy": "Копировать", "common.cancel": "Отмена", "common.save": "Сохранить", "common.create": "Создать", "common.close": "Закрыть", "common.minimize": "Свернуть", "common.mode": "Режим", "common.server": "Сервер", "common.name": "Имя", "common.password": "Пароль", "common.port": "Порт", "common.protocol": "Протокол", "common.unavailable": "Недоступен", "common.checking": "Проверка…", "common.version": "Версия {version}",
     "status.disconnected": "Отключено", "status.connecting": "Подключение…", "status.connected": "Подключено", "status.disconnecting": "Отключение…", "status.error": "Ошибка подключения",
@@ -12,6 +16,10 @@
     "units.byte": "Б", "units.kilobyte": "КБ", "units.megabyte": "МБ", "units.gigabyte": "ГБ", "units.terabyte": "ТБ", "units.perSecond": "{value}/с", "mobile.openMenu": "Открыть меню", "mobile.closeMenu": "Закрыть меню", "mobile.vpnForAndroid": "VPN для Android", "errors.core": "Не удалось запустить ядро", "errors.connection": "Не удалось подключиться", "errors.import": "Не удалось импортировать профиль", "errors.subscription": "Не удалось обновить подписку", "errors.export": "Не удалось экспортировать профиль", "errors.apps": "Не удалось загрузить приложения", "errors.integration": "Не удалось выполнить действие Android"
   },
   "en": {
+    "subscriptions.qrHttpsRequired": "The QR code must contain an HTTPS subscription URL.",
+    "vpn.proxy": "Proxy", "vpn.importMode": "Add VPN", "subscriptions.skipped": "skipped: {count}", "subscriptions.confirmDelete": "Delete the subscription “{name}” and its servers?",
+    "profiles.scanQr": "Scan QR", "profiles.qrScanError": "Could not scan the QR code. Check camera access or paste the link manually.",
+    "share.qrShow": "Show QR", "share.qrHide": "Hide QR", "share.qrTitle": "Profile QR code", "share.qrSecret": "The QR code may contain a password. Do not publish it.", "share.qrTooLong": "The link is too long for a QR code. Copy it instead.",
     "nav.connection": "Connection", "nav.routing": "Routing", "nav.settings": "Settings", "nav.subscriptions": "Subscriptions",
     "common.loading": "Loading…", "common.add": "Add", "common.import": "Import", "common.share": "Share", "common.delete": "Delete", "common.copy": "Copy", "common.cancel": "Cancel", "common.save": "Save", "common.create": "Create", "common.close": "Close", "common.minimize": "Minimize", "common.mode": "Mode", "common.server": "Server", "common.name": "Name", "common.password": "Password", "common.port": "Port", "common.protocol": "Protocol", "common.unavailable": "Unavailable", "common.checking": "Checking…", "common.version": "Version {version}",
     "status.disconnected": "Disconnected", "status.connecting": "Connecting…", "status.connected": "Connected", "status.disconnecting": "Disconnecting…", "status.error": "Connection error",

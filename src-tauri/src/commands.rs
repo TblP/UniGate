@@ -86,7 +86,7 @@ pub async fn singbox_version(app: tauri::AppHandle) -> Result<String, String> {
 #[cfg(mobile)]
 pub async fn singbox_version(_app: tauri::AppHandle) -> Result<String, String> {
     // Версия libbox пинится в scripts/build-libbox-android.ps1 — держим синхронно.
-    Ok("sing-box 1.14.0 (Android libbox)".into())
+    Ok("sing-box 1.14.4 (Android libbox)".into())
 }
 
 /// Возвращает текущие настройки (или значения по умолчанию, если файла нет).
@@ -198,8 +198,8 @@ pub async fn add_subscription(
     name: String,
     url: String,
 ) -> Result<Subscription, String> {
-    let body = subscriptions::fetch(&url).await?;
-    let parsed = subscriptions::parse_list(&body);
+    let body = subscriptions::fetch(&url, false).await?;
+    let (parsed, skipped) = subscriptions::parse_list(&body);
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
     }
@@ -222,6 +222,7 @@ pub async fn add_subscription(
         name,
         url,
         count,
+        skipped,
         updated_at: Some(now_unix()),
     };
     let mut subs = subscriptions::list(&app)?;
@@ -241,8 +242,8 @@ pub async fn update_subscription(
         .iter()
         .position(|s| s.id == id)
         .ok_or_else(|| format!("подписка {id} не найдена"))?;
-    let body = subscriptions::fetch(&subs[idx].url).await?;
-    let parsed = subscriptions::parse_list(&body);
+    let body = subscriptions::fetch(&subs[idx].url, true).await?;
+    let (parsed, skipped) = subscriptions::parse_list(&body);
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
     }
@@ -264,6 +265,7 @@ pub async fn update_subscription(
     profiles::save_all(&app, &profs)?;
 
     subs[idx].count = count;
+    subs[idx].skipped = skipped;
     subs[idx].updated_at = Some(now_unix());
     subscriptions::save_all(&app, &subs)?;
     Ok(subs[idx].clone())

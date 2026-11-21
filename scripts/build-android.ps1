@@ -38,12 +38,13 @@ $geoipSource = Join-Path $projectRoot "src-tauri\binaries\geoip-ru.srs"
 $androidAssets = Join-Path $projectRoot "src-tauri\gen\android\app\src\main\assets"
 
 $awgSourceDir = Join-Path $projectRoot "awg-shim"
+$xraySourceDir = Join-Path $projectRoot "xray-android-bridge"
 $libboxNeedsBuild = -not (Test-Path -LiteralPath $aar)
 if (-not $libboxNeedsBuild) {
   $libboxTime = (Get-Item -LiteralPath $aar).LastWriteTimeUtc
   $libboxInputs = @(
     Get-Item -LiteralPath (Join-Path $PSScriptRoot "build-libbox-android.ps1")
-    Get-ChildItem -LiteralPath $awgSourceDir -Recurse -File |
+    Get-ChildItem -LiteralPath $awgSourceDir, $xraySourceDir -Recurse -File |
       Where-Object { $_.Extension -eq ".go" -or $_.Name -in @("go.mod", "go.sum") }
   )
   $libboxNeedsBuild = $libboxInputs |

@@ -678,6 +678,64 @@ textarea:focus {
 }
 
 /* ===== Импорт / поделиться / приложения ===== */
+.profile-editor-modal {
+  box-sizing: border-box;
+  width: min(34rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.profile-editor-modal::backdrop { background: rgb(0 0 0 / 55%); }
+
+.profile-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-editor-head h2 { margin: 0; }
+.profile-editor-content { padding: 1.25rem; }
+
+.profile-editor-modal .profile-form,
+.vpn-import-content .profile-form { gap: 1rem; }
+
+.profile-editor-modal .profile-form > label,
+.vpn-import-content .profile-form > label { gap: 0.5rem; }
+
+.vpn-import-tabs { margin-bottom: 1.15rem; }
+
+.profile-editor-content .profile-actions,
+.vpn-import-content .profile-actions { flex-wrap: wrap; gap: 0.65rem; }
+
+.profile-editor-content .profile-form > .profile-actions,
+.vpn-import-content .profile-form > .profile-actions { margin-top: 0.25rem; }
+
+.vpn-import-tabs button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.embedded-subscriptions > .hint,
+.embedded-subscriptions > .profile-list { margin-top: 1rem; }
+
+.profile-qr, .profile-qr-preview {
+  display: grid;
+  justify-items: start;
+  gap: 0.75rem;
+}
+
+.profile-qr-preview svg { display: block; max-width: 100%; height: auto; }
+.profile-qr-preview p { margin: 0; }
+
 .import-input {
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   font-size: 0.85rem;
@@ -687,7 +745,7 @@ textarea:focus {
 .share-box {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.9rem;
   margin: 0.5rem 0;
   padding: 0.7rem 0.85rem;
   border: 1px solid var(--border);
@@ -705,7 +763,7 @@ textarea:focus {
 
 .share-formats {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.6rem;
 }
 
 .share-formats button {

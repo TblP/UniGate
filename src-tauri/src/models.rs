@@ -37,6 +37,12 @@ pub struct TlsOpts {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum Transport {
+    Xhttp {
+        path: Option<String>,
+        host: Option<String>,
+        mode: Option<String>,
+        extra: Option<serde_json::Value>,
+    },
     Ws {
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<String>,
@@ -130,6 +136,12 @@ pub enum Outbound {
         #[serde(skip_serializing_if = "Option::is_none")]
         transport: Option<Transport>,
     },
+    Naive {
+        server: String,
+        port: u16,
+        username: String,
+        password: String,
+    },
     Tuic {
         server: String,
         port: u16,
@@ -149,6 +161,12 @@ pub enum Outbound {
         server: String,
         port: u16,
     },
+}
+
+impl Outbound {
+    pub fn uses_xhttp(&self) -> bool {
+        matches!(self, Self::Vless { transport: Some(Transport::Xhttp { .. }), .. })
+    }
 }
 
 /// Профиль подключения: именованная обёртка над одним outbound.
@@ -173,6 +191,8 @@ pub struct Subscription {
     /// Сколько профилей создано из подписки при последнем обновлении.
     #[serde(default)]
     pub count: usize,
+    #[serde(default)]
+    pub skipped: usize,
     /// Метка последнего обновления (UNIX-время, секунды).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<u64>,

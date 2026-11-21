@@ -1,0 +1,22 @@
+{
+  "productName": "UniGate Dev",
+  "identifier": "com.unigate.app.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "UniGate Dev",
+        "width": 800,
+        "height": 600,
+        "minWidth": 800,
+        "minHeight": 600,
+        "maxWidth": 800,
+        "maxHeight": 600,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "visible": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "identifier": "qr-android",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": [
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-request-permissions"
+  ]
+}

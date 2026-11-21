@@ -1,16 +1,50 @@
-//! Живая статистика трафика через Clash API sing-box.
+//! Живая статистика трафика через локальные API sing-box и Xray.
 //!
 //! Пока подключение активно — раз в секунду опрашиваем `/connections`,
 //! берём суммарные байты, считаем скорость как разницу и шлём событие `traffic`.
 
-use crate::config::CLASH_API_PORT;
+use crate::config::{CLASH_API_PORT, XRAY_TRAFFIC_TAG};
 use crate::connection;
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter};
 
 const EVENT: &str = "traffic";
+static POLL_SESSION: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy)]
+pub enum Source {
+    SingBox,
+    Xray,
+}
+
+impl Source {
+    fn path(self) -> &'static str {
+        match self {
+            Self::SingBox => "/connections",
+            Self::Xray => "/debug/vars",
+        }
+    }
+
+    fn totals(self, value: &Value) -> Option<(u64, u64)> {
+        match self {
+            Self::SingBox => Some((
+                value.get("uploadTotal")?.as_u64()?,
+                value.get("downloadTotal")?.as_u64()?,
+            )),
+            Self::Xray => {
+                let outbound = value.get("stats")?.get("outbound")?;
+                let counter = outbound.get(XRAY_TRAFFIC_TAG);
+                Some((
+                    counter.and_then(|v| v.get("uplink")).and_then(Value::as_u64).unwrap_or(0),
+                    counter.and_then(|v| v.get("downlink")).and_then(Value::as_u64).unwrap_or(0),
+                ))
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,30 +61,41 @@ pub struct Traffic {
 
 /// Запускает фоновый опрос статистики; живёт, пока состояние == Connected.
 pub fn start_polling(app: AppHandle) {
+    start_polling_for(app, Source::SingBox);
+}
+
+pub fn start_polling_for(app: AppHandle, source: Source) {
+    let session = POLL_SESSION.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     tauri::async_runtime::spawn(async move {
-        let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{CLASH_API_PORT}/connections");
-        let mut last: Option<(u64, u64)> = None;
+        let Ok(client) = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(2)).build() else { return };
+        let url = format!("http://127.0.0.1:{CLASH_API_PORT}{}", source.path());
+        let mut last: Option<(u64, u64, std::time::Instant)> = None;
 
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            if !connection::is_connected(&app) {
+            if POLL_SESSION.load(Ordering::Relaxed) != session || !connection::is_connected(&app) {
                 break;
             }
 
             let value: Option<Value> = match client.get(&url).send().await {
-                Ok(resp) => resp.json().await.ok(),
-                Err(_) => None,
+                Ok(resp) if resp.status().is_success() => resp.json().await.ok(),
+                _ => None,
             };
-            let Some(v) = value else { continue };
+            if POLL_SESSION.load(Ordering::Relaxed) != session || !connection::is_connected(&app) {
+                break;
+            }
+            let Some((up_total, down_total)) = value.as_ref().and_then(|v| source.totals(v)) else { continue };
 
-            let up_total = v.get("uploadTotal").and_then(Value::as_u64).unwrap_or(0);
-            let down_total = v.get("downloadTotal").and_then(Value::as_u64).unwrap_or(0);
+            let now = std::time::Instant::now();
             let (up, down) = match last {
-                Some((lu, ld)) => (up_total.saturating_sub(lu), down_total.saturating_sub(ld)),
+                Some((lu, ld, then)) => {
+                    let seconds = now.duration_since(then).as_secs_f64().max(0.001);
+                    ((up_total.saturating_sub(lu) as f64 / seconds) as u64,
+                     (down_total.saturating_sub(ld) as f64 / seconds) as u64)
+                }
                 None => (0, 0),
             };
-            last = Some((up_total, down_total));
+            last = Some((up_total, down_total, now));
 
             let _ = app.emit(
                 EVENT,
@@ -64,6 +109,24 @@ pub fn start_polling(app: AppHandle) {
         }
 
         // обнулить индикатор после остановки
-        let _ = app.emit(EVENT, Traffic::default());
+        if POLL_SESSION.load(Ordering::Relaxed) == session {
+            let _ = app.emit(EVENT, Traffic::default());
+        }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn totals_from_both_cores() {
+        assert_eq!(Source::SingBox.totals(&json!({"uploadTotal": 5, "downloadTotal": 40})), Some((5, 40)));
+        let mut payload = json!({"stats": {"outbound": {"direct": {"uplink": 900, "downlink": 900}}}});
+        assert_eq!(Source::Xray.totals(&payload), Some((0, 0)));
+        payload["stats"]["outbound"][XRAY_TRAFFIC_TAG] = json!({"uplink": 7, "downlink": 80});
+        assert_eq!(Source::Xray.totals(&payload), Some((7, 80)));
+        assert_eq!(Source::Xray.totals(&json!({})), None);
+    }
 }

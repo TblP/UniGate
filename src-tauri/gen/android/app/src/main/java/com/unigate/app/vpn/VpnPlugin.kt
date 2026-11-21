@@ -30,6 +30,7 @@ import java.io.File
 class StartVpnArgs {
     lateinit var config: String
     var awgConfig: String? = null
+    var xrayConfig: String? = null
     var profileName: String = "UniGate"
     var includePackages: List<String> = emptyList()
     var excludePackages: List<String> = emptyList()
@@ -169,6 +170,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 activity,
                 args.config,
                 args.awgConfig,
+                args.xrayConfig,
                 args.profileName,
                 args.includePackages,
                 args.excludePackages,
@@ -179,6 +181,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 action = UniGateVpnService.ACTION_START
                 putExtra(UniGateVpnService.EXTRA_CONFIG, args.config)
                 putExtra(UniGateVpnService.EXTRA_AWG_CONFIG, args.awgConfig)
+                putExtra(UniGateVpnService.EXTRA_XRAY_CONFIG, args.xrayConfig)
                 putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, args.profileName)
                 putExtra(UniGateVpnService.EXTRA_START_TOKEN, startToken)
                 putStringArrayListExtra(

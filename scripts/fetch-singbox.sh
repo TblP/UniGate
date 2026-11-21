@@ -7,7 +7,7 @@
 # amneziawg/wintun — только Windows (см. fetch-singbox.ps1).
 set -euo pipefail
 
-SINGBOX_VERSION="1.14.0"
+SINGBOX_VERSION="1.14.4"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$ROOT/src-tauri/binaries"
 mkdir -p "$BIN_DIR"
@@ -60,6 +60,10 @@ if [ "$need_download" = 1 ]; then
   rm -rf "$tmp"
   echo "Готово: $dest"
   "$dest" version | head -1
+fi
+
+if [ "$sb_os" = "darwin" ]; then
+  bash "$ROOT/scripts/fetch-xray-macos.sh"
 fi
 
 # geoip-ru.srs (RU-обход в split-tunneling)
