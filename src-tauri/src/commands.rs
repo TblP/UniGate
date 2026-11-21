@@ -198,7 +198,7 @@ pub async fn add_subscription(
     name: String,
     url: String,
 ) -> Result<Subscription, String> {
-    let body = subscriptions::fetch(&url).await?;
+    let body = subscriptions::fetch(&url, false).await?;
     let (parsed, skipped) = subscriptions::parse_list(&body);
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());
@@ -242,7 +242,7 @@ pub async fn update_subscription(
         .iter()
         .position(|s| s.id == id)
         .ok_or_else(|| format!("подписка {id} не найдена"))?;
-    let body = subscriptions::fetch(&subs[idx].url).await?;
+    let body = subscriptions::fetch(&subs[idx].url, true).await?;
     let (parsed, skipped) = subscriptions::parse_list(&body);
     if parsed.is_empty() {
         return Err("в подписке не найдено серверов".into());

@@ -19,30 +19,41 @@ pub fn save_all(app: &AppHandle, subs: &[Subscription]) -> Result<(), String> {
 }
 
 /// Скачивает тело подписки по URL.
-pub async fn fetch(url: &str) -> Result<String, String> {
+///
+/// Новые подписки — только HTTPS. `allow_legacy_http` = подписка сохранена
+/// до 1.2.3, когда http:// ещё принимался: такие продолжают обновляться,
+/// иначе пользователю пришлось бы удалять подписку вместе с её профилями.
+pub async fn fetch(url: &str, allow_legacy_http: bool) -> Result<String, String> {
     const MAX_BYTES: usize = 2 * 1024 * 1024;
     let url = reqwest::Url::parse(url).map_err(|_| "неверный URL подписки")?;
-    if url.scheme() != "https" || url.host_str().is_none()
+    let scheme_ok = url.scheme() == "https" || (allow_legacy_http && url.scheme() == "http");
+    if !scheme_ok || url.host_str().is_none()
         || !url.username().is_empty() || url.password().is_some()
     {
         return Err("для подписки нужна HTTPS-ссылка без логина и пароля в адресе".into());
     }
     let client = reqwest::Client::builder()
         .user_agent("UniGate")
-        .https_only(true)
+        .https_only(url.scheme() == "https")
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|_| "не удалось создать HTTP-клиент")?;
+    // Причину ошибки (DNS/TLS/таймаут) показываем, но без URL: в нём
+    // у подписок обычно секретный токен.
     let mut resp = client
         .get(url)
         .send()
         .await
-        .map_err(|_| "не удалось загрузить подписку")?;
+        .map_err(|e| format!("не удалось загрузить подписку: {}", e.without_url()))?;
     if !resp.status().is_success() {
         return Err(format!("подписка вернула статус {}", resp.status()));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|_| "не удалось прочитать подписку")? {
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("не удалось прочитать подписку: {}", e.without_url()))?
+    {
         if bytes.len().saturating_add(chunk.len()) > MAX_BYTES {
             return Err("ответ подписки слишком большой".into());
         }

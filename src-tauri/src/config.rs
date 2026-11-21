@@ -623,7 +623,6 @@ fn apply_tls(v: &mut Value, tls: &TlsOpts) {
     v["tls"] = t;
 }
 
-/// Добавляет в outbound объект `transport`, если он задан (ws/grpc).
 pub fn enable_xray_traffic(config: &mut Value) {
     config["outbounds"][0]["tag"] = json!(XRAY_TRAFFIC_TAG);
     config["stats"] = json!({});
@@ -668,6 +667,17 @@ pub fn xray_xhttp(outbound: &Outbound, local_port: u16) -> Result<Value, String>
     }))
 }
 
+/// Xray-шим XHTTP поднимает SOCKS без UDP: proxy-outbound sing-box
+/// ограничиваем TCP, иначе UDP-сессии уходили бы в шим и висели.
+pub fn force_tcp_proxy(config: &mut Value) {
+    if let Some(proxy) = config["outbounds"]
+        .as_array_mut()
+        .and_then(|outbounds| outbounds.iter_mut().find(|outbound| outbound["tag"] == "proxy"))
+    {
+        proxy["network"] = json!("tcp");
+    }
+}
+
 pub fn xray_xhttp_tun_shim(
     outbound: &Outbound,
     port: u16,
@@ -692,6 +702,7 @@ pub fn xray_xhttp_tun_shim(
     Ok(cfg)
 }
 
+/// Добавляет в outbound объект `transport`, если он задан (ws/grpc).
 fn apply_transport(v: &mut Value, transport: &Option<Transport>) {
     let Some(transport) = transport else { return };
     v["transport"] = match transport {

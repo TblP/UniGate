@@ -413,7 +413,7 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         "vmess" => {
             let node = vnext_first(settings)?;
             let user = users_first(node)?;
-            let (tls, transport) = xray_stream(stream);
+            let (tls, transport) = xray_stream_no_xhttp(stream, "VMess")?;
             Ok(Outbound::Vmess {
                 server: xstr(node, "address"),
                 port: xport(node),
@@ -426,7 +426,7 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         }
         "trojan" => {
             let srv = servers_first(settings)?;
-            let (tls, transport) = xray_stream(stream);
+            let (tls, transport) = xray_stream_no_xhttp(stream, "Trojan")?;
             Ok(Outbound::Trojan {
                 server: xstr(srv, "address"),
                 port: xport(srv),
@@ -437,6 +437,7 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         }
         "shadowsocks" => {
             let srv = servers_first(settings)?;
+            xray_stream_no_xhttp(stream, "Shadowsocks")?;
             Ok(Outbound::Shadowsocks {
                 server: xstr(srv, "address"),
                 port: xport(srv),
@@ -446,6 +447,19 @@ fn xray_to_outbound(xray: &Value) -> Result<Outbound, String> {
         }
         other => Err(format!("xray: протокол «{other}» пока не поддержан")),
     }
+}
+
+/// XHTTP поддерживается только для VLESS (через Xray); sing-box его не знает,
+/// поэтому для остальных протоколов отклоняем импорт сразу, а не падением ядра.
+fn xray_stream_no_xhttp(
+    stream: Option<&Value>,
+    proto: &str,
+) -> Result<(TlsOpts, Option<Transport>), String> {
+    let (tls, transport) = xray_stream(stream);
+    if matches!(transport, Some(Transport::Xhttp { .. })) {
+        return Err(format!("XHTTP поддерживается только для VLESS, не для {proto}"));
+    }
+    Ok((tls, transport))
 }
 
 /// streamSettings Xray → (TlsOpts, Transport).
@@ -1034,6 +1048,23 @@ mod tests {
         ] {
             assert!(config.contains(field), "missing {field}");
         }
+    }
+
+    #[test]
+    fn xray_xhttp_rejected_for_non_vless() {
+        let vmess = serde_json::json!({ "outbounds": [{
+            "protocol": "vmess",
+            "settings": { "vnext": [{ "address": "ex.com", "port": 443,
+                "users": [{ "id": "11111111-1111-1111-1111-111111111111" }] }] },
+            "streamSettings": { "network": "xhttp", "security": "tls" }
+        }]});
+        assert!(xray_to_outbound(&vmess).is_err());
+        let trojan = serde_json::json!({ "outbounds": [{
+            "protocol": "trojan",
+            "settings": { "servers": [{ "address": "ex.com", "port": 443, "password": "p" }] },
+            "streamSettings": { "network": "splithttp", "security": "tls" }
+        }]});
+        assert!(xray_to_outbound(&trojan).is_err());
     }
 
     #[test]

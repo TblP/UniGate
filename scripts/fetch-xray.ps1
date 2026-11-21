@@ -20,7 +20,6 @@ try {
   New-Item -ItemType Directory -Force -Path $binDir | Out-Null
   Copy-Item -LiteralPath $exe -Destination $dest -Force
 } finally {
-  if ($stage.Parent.FullName -eq (Resolve-Path -LiteralPath $env:TEMP).Path) {
-    Remove-Item -LiteralPath $stage.FullName -Recurse -Force
-  }
+  # $stage — каталог с уникальным GUID, созданный выше этим же скриптом
+  Remove-Item -LiteralPath $stage.FullName -Recurse -Force -ErrorAction SilentlyContinue
 }

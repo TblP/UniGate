@@ -110,6 +110,7 @@ pub fn reconcile_startup(_app: &AppHandle) {
     if sysproxy::is_enabled_for(LOCAL_PORT) {
         let _ = sysproxy::disable();
     }
+    kill_orphan_xray(_app);
     // macOS: убираем «застрявшие» сигнальные файлы после жёсткого краша GUI —
     // тогда оставшийся root-watcher (если жив) сам завершит sing-box/awg-тоннель.
     #[cfg(target_os = "macos")]
@@ -190,6 +191,7 @@ pub fn cleanup(app: &AppHandle) {
         let _ = shim.kill();
         let _ = shim.wait();
     }
+    forget_xray_pid(app);
     if let Some(handle) = awg {
         if let Err(e) = awg_tunnel_down(app, &handle) {
             eprintln!("не удалось снять AmneziaWG-тоннель: {e}");
@@ -275,27 +277,99 @@ fn awg_shim_exe() -> Option<std::path::PathBuf> {
     }
 }
 
-async fn start_xray_shim(app: &AppHandle, cfg: &serde_json::Value) -> Result<std::process::Child, String> {
+/// Путь к Xray (XHTTP). В prod externalBin кладёт его рядом с exe без triple.
+fn xray_exe() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     const NAMES: &[&str] = &["xray-x86_64-pc-windows-msvc.exe", "xray.exe"];
     #[cfg(target_os = "macos")]
-    const NAMES: &[&str] = &["xray"];
+    const NAMES: &[&str] = &["xray-aarch64-apple-darwin", "xray-x86_64-apple-darwin", "xray"];
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     const NAMES: &[&str] = &[];
-    #[cfg(not(target_os = "macos"))]
-    let candidate = NAMES.iter().copied().find_map(binaries_file);
-    #[cfg(target_os = "macos")]
-    let candidate = std::env::current_exe().ok().and_then(|app| {
-        let dir = app.parent()?;
-        NAMES.iter().map(|name| dir.join(name)).find(|file| file.is_file())
-    }).or_else(|| {
-        if !cfg!(debug_assertions) { return None; }
-        let name = if cfg!(target_arch = "aarch64") { "xray-aarch64-apple-darwin" } else { "xray-x86_64-apple-darwin" };
-        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(name);
-        file.is_file().then_some(file)
+    NAMES.iter().copied().find_map(binaries_file)
+}
+
+/// Ждёт, пока на 127.0.0.1:`port` начнут принимать TCP. `alive` вызывается
+/// перед каждой попыткой: false = процесс умер, ждать бессмысленно.
+async fn wait_tcp_ready(
+    port: u16,
+    timeout: std::time::Duration,
+    mut alive: impl FnMut() -> bool,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while alive() && tokio::time::Instant::now() < deadline {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    }
+    false
+}
+
+/// PID Xray-помощника на диске: у Xray нет stdin-сторожа, как у awg-shim,
+/// поэтому после краха UniGate он остаётся жить и держит порт шима.
+/// На старте/перед подключением такой «сирота» добивается по PID-файлу.
+const XRAY_PID_FILE: &str = "xray-shim.pid";
+
+fn forget_xray_pid(app: &AppHandle) {
+    if let Ok(path) = storage::path(app, XRAY_PID_FILE) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Имя исполняемого файла процесса (для проверки, что PID не переиспользован).
+#[cfg(target_os = "windows")]
+fn process_image_name(pid: u32) -> Option<String> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len) };
+    unsafe { CloseHandle(handle) };
+    (ok != 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
+}
+
+#[cfg(unix)]
+fn process_image_name(pid: u32) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Добивает Xray-помощник, оставшийся от прошлой (аварийно завершённой) сессии.
+fn kill_orphan_xray(app: &AppHandle) {
+    let Ok(path) = storage::path(app, XRAY_PID_FILE) else { return };
+    let Some(pid) = std::fs::read_to_string(&path).ok().and_then(|s| s.trim().parse::<u32>().ok()) else {
+        let _ = std::fs::remove_file(&path);
+        return;
+    };
+    let _ = std::fs::remove_file(&path);
+    let is_xray = process_image_name(pid).is_some_and(|name| {
+        std::path::Path::new(&name)
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().starts_with("xray"))
     });
-    let exe = candidate
-        .ok_or("Xray не найден рядом с UniGate")?;
+    if !is_xray {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    let _ = terminate_windows_process(pid, "Xray");
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+}
+
+async fn start_xray_shim(app: &AppHandle, cfg: &serde_json::Value) -> Result<std::process::Child, String> {
+    let exe = xray_exe().ok_or("Xray не найден рядом с UniGate")?;
     storage::write_json(app, XRAY_TUN_CONF, cfg)?;
     let path = storage::path(app, XRAY_TUN_CONF)?;
     let mut cmd = std::process::Command::new(exe);
@@ -310,17 +384,20 @@ async fn start_xray_shim(app: &AppHandle, cfg: &serde_json::Value) -> Result<std
     }
     let result = async {
         let mut child = cmd.spawn().map_err(|e| format!("не удалось запустить Xray: {e}"))?;
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
-        loop {
-            if !matches!(child.try_wait(), Ok(None)) || tokio::time::Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("Xray не открыл локальный прокси для TUN".into());
-            }
-            if tokio::net::TcpStream::connect(("127.0.0.1", SHIM_PORT)).await.is_ok() {
-                return Ok(child);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        if let Ok(pid_path) = storage::path(app, XRAY_PID_FILE) {
+            let _ = std::fs::write(pid_path, child.id().to_string());
+        }
+        let ready = wait_tcp_ready(SHIM_PORT, std::time::Duration::from_secs(3), || {
+            matches!(child.try_wait(), Ok(None))
+        })
+        .await;
+        if ready {
+            Ok(child)
+        } else {
+            let _ = child.kill();
+            let _ = child.wait();
+            forget_xray_pid(app);
+            Err("Xray не открыл локальный прокси для TUN".to_string())
         }
     }.await;
     let _ = std::fs::remove_file(path);
@@ -403,6 +480,7 @@ fn kill_shim(app: &AppHandle) {
             }
         }
     }
+    forget_xray_pid(app);
 }
 
 fn valid_geoip(bytes: &[u8]) -> bool {
@@ -1143,11 +1221,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     if let Some((ip, _)) = &xray_shim {
         exclude_endpoint_from_tun(&mut cfg, &[*ip]);
-        if let Some(outbound) = cfg["outbounds"].as_array_mut().and_then(|outbounds| {
-            outbounds.iter_mut().find(|outbound| outbound["tag"] == "proxy")
-        }) {
-            outbound["network"] = serde_json::json!("tcp");
-        }
+        config::force_tcp_proxy(&mut cfg);
     }
 
     // Трафик самого шима (UDP к AWG-серверу) обязан идти мимо TUN, иначе цикл:
@@ -1202,6 +1276,8 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     // Порт может быть занят предыдущим ядром, которое завершается асинхронно
     // (root-ядро macOS TUN убивает watcher с задержкой), или чужим процессом —
     // тогда sing-box падает с невнятным «код 1». Ждём до 3 с и говорим внятно.
+    // Сирота-Xray от аварийной сессии держал бы порт шима — добиваем заранее.
+    kill_orphan_xray(&app);
     {
         let mut ports = vec![config::CLASH_API_PORT];
         if mode == Mode::Proxy {
@@ -1283,17 +1359,24 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     };
 
     if xray_proxy {
-        let readiness = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            loop {
-                if tokio::net::TcpStream::connect(("127.0.0.1", LOCAL_PORT)).await.is_ok() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            }
-        }).await;
-        if readiness.is_err() {
+        let ready = wait_tcp_ready(LOCAL_PORT, std::time::Duration::from_secs(3), || true).await;
+        if !ready {
             let _ = child.kill();
-            let message = "Xray не открыл локальный прокси. Проверьте параметры XHTTP.".to_string();
+            // что Xray успел напечатать до смерти (ошибка конфига, занятый порт)
+            let mut tail = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let CommandEvent::Stderr(bytes) | CommandEvent::Stdout(bytes) = event {
+                    let line = String::from_utf8_lossy(&bytes).trim().to_string();
+                    if !line.is_empty() {
+                        tail.push(line);
+                    }
+                }
+            }
+            let skip = tail.len().saturating_sub(5);
+            let mut message = "Xray не открыл локальный прокси. Проверьте параметры XHTTP.".to_string();
+            if !tail.is_empty() {
+                message = format!("{message}\n{}", tail[skip..].join("\n"));
+            }
             set_state(&app, ConnectionState::Error { message: message.clone() });
             return Err(message);
         }
@@ -1351,8 +1434,11 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
                     let line = String::from_utf8_lossy(&bytes);
                     let line = line.trim();
                     if !line.is_empty() {
-                        if xray_proxy { continue; }
-                        eprintln!("[{core}] {line}");
+                        // stdout Xray может содержать адреса — в консоль не пишем,
+                        // но хвост держим для сообщения об ошибке
+                        if !xray_proxy {
+                            eprintln!("[{core}] {line}");
+                        }
                         if stderr_tail.len() == 5 {
                             stderr_tail.pop_front();
                         }
@@ -1740,6 +1826,7 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
                             let _ = shim.wait();
                         }
                     };
+                    forget_xray_pid(&app);
                 }
                 Err(e) => stop_errors.push(e),
             }
@@ -1774,6 +1861,7 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
             if let Err(e) = shim.wait() {
                 stop_errors.push(format!("не удалось дождаться остановки AWG-движка: {e}"));
             }
+            forget_xray_pid(&app);
         }
         if let Some(handle) = awg {
             if let Err(e) = awg_tunnel_down(&app, &handle) {
