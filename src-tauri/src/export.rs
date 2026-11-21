@@ -80,6 +80,14 @@ fn tls_query(tls: &TlsOpts, default_security: &str) -> Vec<(&'static str, String
 fn transport_query(transport: &Option<Transport>) -> Vec<(&'static str, String)> {
     match transport {
         None => vec![("type", "tcp".into())],
+        Some(Transport::Xhttp { path, host, mode, extra }) => {
+            let mut q = vec![("type", "xhttp".into())];
+            for (key, value) in [("path", path), ("host", host), ("mode", mode)] {
+                if let Some(value) = value { q.push((key, value.clone())); }
+            }
+            if let Some(value) = extra { q.push(("extra", value.to_string())); }
+            q
+        }
         Some(Transport::Ws { path, host }) => {
             let mut q = vec![("type", "ws".into())];
             if let Some(p) = path {
@@ -169,6 +177,9 @@ fn amnezia_link(name: &str, config: &str, server: &str, port: u16) -> String {
 pub fn to_json(outbound: &Outbound) -> String {
     match outbound {
         Outbound::AmneziaWg { config, .. } => config.clone(),
+        _ if outbound.uses_xhttp() => crate::config::xray_xhttp(outbound, 2080)
+            .and_then(|config| serde_json::to_string_pretty(&config).map_err(|e| e.to_string()))
+            .unwrap_or_default(),
         _ => serde_json::to_string_pretty(&crate::config::outbound_to_singbox(outbound))
             .unwrap_or_default(),
     }
@@ -217,6 +228,14 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
             q.extend(tls_query(tls, "tls"));
             q.extend(transport_query(transport));
             format!("vless://{uuid}@{server}:{port}{}#{}", query(&q), enc(name))
+        }
+        Outbound::Naive { server, port, username, password } => {
+            let host = if server.contains(':') && !server.starts_with('[') {
+                format!("[{server}]")
+            } else {
+                server.clone()
+            };
+            format!("naive+https://{}:{}@{host}:{port}#{}", enc(username), enc(password), enc(name))
         }
         Outbound::Tuic {
             server,
@@ -282,6 +301,9 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
         } => {
             let (net, host, path) = match transport {
                 None => ("tcp", String::new(), String::new()),
+                Some(Transport::Xhttp { path, host, .. }) => (
+                    "xhttp", host.clone().unwrap_or_default(), path.clone().unwrap_or_default()
+                ),
                 Some(Transport::Ws { path, host }) => (
                     "ws",
                     host.clone().unwrap_or_default(),
@@ -327,6 +349,43 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xhttp_share_and_xray_config_roundtrip() {
+        let link = "vless://11111111-1111-1111-1111-111111111111@example.test:443?security=tls&encryption=none&type=xhttp&mode=packet-up&path=%2Fdemo&extra=%7B%22noGRPCHeader%22%3Atrue%7D#Demo";
+        let (name, outbound) = crate::import::parse(link).unwrap();
+        assert!(outbound.uses_xhttp());
+        let config = crate::config::xray_xhttp(&outbound, 2080).unwrap();
+        let stream = &config["outbounds"][0]["streamSettings"];
+        assert_eq!(stream["network"], "xhttp");
+        assert_eq!(stream["xhttpSettings"]["mode"], "packet-up");
+        assert_eq!(stream["xhttpSettings"]["path"], "/demo");
+        assert_eq!(stream["xhttpSettings"]["extra"]["noGRPCHeader"], true);
+        assert_eq!(crate::import::parse(&super::to_share(&name, &outbound)).unwrap().1, outbound);
+        assert_eq!(crate::import::parse(&super::to_json(&outbound)).unwrap().1, outbound);
+        let shim = crate::config::xray_xhttp_tun_shim(
+            &outbound, 2081, "192.0.2.1".parse().unwrap(), "test-secret",
+        ).unwrap();
+        assert_eq!(shim["inbounds"][0]["listen"], "127.0.0.1");
+        assert_eq!(shim["inbounds"][0]["settings"]["auth"], "password");
+        assert_eq!(shim["outbounds"][0]["settings"]["vnext"][0]["address"], "192.0.2.1");
+        assert_eq!(shim["outbounds"][0]["streamSettings"]["tlsSettings"]["serverName"], "example.test");
+    }
+    #[test]
+    fn naive_share_roundtrip() {
+        let input = "naive+https://user:p%40ss@example.com#Na%C3%AFve";
+        let (name, outbound) = crate::import::parse(input).unwrap();
+        assert_eq!(name, "Naïve");
+        let config = crate::config::outbound_to_singbox(&outbound);
+        assert_eq!(config["type"], "naive");
+        assert_eq!(config["server_port"], 443);
+        assert_eq!(config["password"], "p@ss");
+        assert_eq!(config["tls"]["enabled"], true);
+        assert_eq!(
+            crate::import::parse(&super::to_share(&name, &outbound)).unwrap(),
+            (name, outbound)
+        );
+        assert!(crate::import::parse("naive+https://example.com").is_err());
+    }
     use super::*;
     use crate::import;
     use std::io::Read;

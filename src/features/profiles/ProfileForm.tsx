@@ -96,7 +96,7 @@ export function ProfileForm({ initial, onSubmit, onCancel }: Props) {
         <select value={type} onChange={(e) => setType(e.target.value as ProtocolType)}>
           <option value="socks">SOCKS5</option>
           <option value="http">HTTP(S)</option>
-          <option value="hysteria2">Hysteria 2</option>
+          {initial?.outbound.type === "hysteria2" && <option value="hysteria2">Hysteria 2</option>}
         </select>
       </label>
 

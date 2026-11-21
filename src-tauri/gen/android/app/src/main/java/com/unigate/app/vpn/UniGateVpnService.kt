@@ -25,6 +25,8 @@ import com.unigate.app.MainActivity
 import com.unigate.app.R
 import io.nekohasekai.awgshim.Awgshim
 import io.nekohasekai.awgshim.Protector
+import io.nekohasekai.xraybridge.Protector as XrayProtector
+import io.nekohasekai.xraybridge.Xraybridge
 import io.nekohasekai.libbox.BridgeOptions
 import io.nekohasekai.libbox.BridgeSession
 import io.nekohasekai.libbox.CommandServer
@@ -58,6 +60,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         const val ACTION_STOP = "com.unigate.app.vpn.STOP"
         const val EXTRA_CONFIG = "config"
         const val EXTRA_AWG_CONFIG = "awgConfig"
+        const val EXTRA_XRAY_CONFIG = "xrayConfig"
         const val EXTRA_PROFILE_NAME = "profileName"
         const val EXTRA_INCLUDE_PACKAGES = "includePackages"
         const val EXTRA_EXCLUDE_PACKAGES = "excludePackages"
@@ -136,6 +139,11 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         )
         val saved = if (restoreRequested) VpnQuickControl.savedConnection(this) else null
         val config = explicitConfig?.takeIf { it.isNotBlank() } ?: saved?.config
+        val xrayConfig = if (explicitConfig != null) {
+            intent?.getStringExtra(EXTRA_XRAY_CONFIG)
+        } else {
+            saved?.xrayConfig
+        }
         val awgConfig = if (explicitConfig != null) {
             explicitAwgConfig?.takeIf { it.isNotBlank() }
         } else {
@@ -163,7 +171,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
 
         Thread {
             runCatching {
-                startVpn(config, awgConfig, includePackages, excludePackages)
+                startVpn(config, awgConfig, xrayConfig, includePackages, excludePackages)
             }.onSuccess {
                 finishStart(startToken, null)
                 liveState = VpnQuickControl.State.ON
@@ -201,10 +209,17 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     private fun startVpn(
         config: String,
         awgConfig: String?,
+        xrayConfig: String?,
         includePackages: List<String>,
         excludePackages: List<String>,
     ) {
         closeCore()
+        if (!xrayConfig.isNullOrBlank()) {
+            Xraybridge.start(xrayConfig, object : XrayProtector {
+                override fun protect(fd: Long): Boolean =
+                    fd in 0..Int.MAX_VALUE.toLong() && this@UniGateVpnService.protect(fd.toInt())
+            })
+        }
         if (!awgConfig.isNullOrBlank()) {
             Awgshim.start(
                 awgConfig,
@@ -287,6 +302,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         runCatching { commandServer?.close() }
         commandServer = null
         runCatching { Awgshim.stop() }
+        runCatching { Xraybridge.stop() }
         tunnel?.close()
         tunnel = null
         defaultNetworkCallback?.let { runCatching { connectivity.unregisterNetworkCallback(it) } }
@@ -420,7 +436,6 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     override fun autoDetectInterfaceControl(fd: Int) {
         protect(fd)
     }
-    override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
     override fun underNetworkExtension(): Boolean = false
     override fun includeAllNetworks(): Boolean = false
     override fun clearDNSCache() = Unit

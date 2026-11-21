@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.14.0"
+$version = "1.14.4"
 $sourceDir = Join-Path $ToolRoot "sing-box-$version"
 $goExe = Join-Path $ToolRoot "go\bin\go.exe"
 $goPath = Join-Path $ToolRoot "gopath"
@@ -21,6 +21,7 @@ $ndkDir = Join-Path $sdkDir "ndk\28.0.13004108"
 $destination = Join-Path $PSScriptRoot "..\src-tauri\gen\android\app\libs\libbox.aar"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $awgSourceDir = Join-Path $projectRoot "awg-shim"
+$xraySourceDir = Join-Path $projectRoot "xray-android-bridge"
 
 if (-not (Test-Path -LiteralPath $goExe)) {
   throw "Go not found. Run scripts/setup-android.ps1 first."
@@ -64,11 +65,15 @@ if (-not $gomobileReady) {
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
+$mobileModuleJson = & $goExe mod download -json "github.com/sagernet/gomobile@$gomobileVersion"
+if ($LASTEXITCODE -ne 0) { throw "Failed to resolve gomobile $gomobileVersion sources" }
+$mobileSourceDir = ($mobileModuleJson | Out-String | ConvertFrom-Json).Dir
+if (-not $mobileSourceDir) { throw "gomobile source directory not found" }
 $workDir = Join-Path $env:TEMP "unigate-android-go-work-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 Push-Location $workDir
 try {
-  & $goExe work init $sourceDir $awgSourceDir
+  & $goExe work init $sourceDir $awgSourceDir $xraySourceDir $mobileSourceDir
   if ($LASTEXITCODE -ne 0) { throw "Failed to create combined Go workspace" }
 } finally {
   Pop-Location
@@ -76,6 +81,8 @@ try {
 
 $previousGoWork = [Environment]::GetEnvironmentVariable("GOWORK", "Process")
 $env:GOWORK = Join-Path $workDir "go.work"
+$previousCgoLdflagsAllow = [Environment]::GetEnvironmentVariable("CGO_LDFLAGS_ALLOW", "Process")
+$env:CGO_LDFLAGS_ALLOW = '-l:libcronet\.a'
 $tags = @(
   "with_gvisor", "with_quic", "with_wireguard", "with_utls",
   "with_naive_outbound", "with_clash_api", "badlinkname", "tfogo_checklinkname0",
@@ -99,12 +106,14 @@ try {
     "-ldflags", $ldflags,
     "-tags", $tags,
     "./experimental/libbox",
-    "unigate/awg-shim"
+    "unigate/awg-shim",
+    "unigate/xray-android-bridge"
   )
   & (Join-Path $goBin "gomobile.exe") @bindArgs
-  if ($LASTEXITCODE -ne 0) { throw "combined libbox + awg-shim build failed" }
+  if ($LASTEXITCODE -ne 0) { throw "combined libbox + awg-shim + xray build failed" }
 } finally {
   Pop-Location
+  [Environment]::SetEnvironmentVariable("CGO_LDFLAGS_ALLOW", $previousCgoLdflagsAllow, "Process")
   if ([string]::IsNullOrEmpty($previousGoWork)) {
     Remove-Item Env:GOWORK -ErrorAction SilentlyContinue
   } else {
@@ -117,4 +126,4 @@ try {
   }
 }
 
-Write-Host "Combined libbox + awg-shim AAR ready: $destination"
+Write-Host "Combined libbox + awg-shim + xray AAR ready: $destination"

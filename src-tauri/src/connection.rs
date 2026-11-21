@@ -17,6 +17,7 @@ pub const LOCAL_PORT: u16 = 2080;
 pub const SHIM_PORT: u16 = 2081;
 /// Конфиг для awg-shim (тот же .conf, что у legacy-движка, но своё имя файла).
 const SHIM_CONF: &str = "awg-shim.conf";
+const XRAY_TUN_CONF: &str = "xray-tun-config.json";
 const RUNNING_CONFIG: &str = "running-config.json";
 const EVENT: &str = "connection-state";
 const GEOIP_RU_FILE: &str = "geoip-ru.srs";
@@ -48,9 +49,7 @@ pub struct ConnState {
     child: Option<CommandChild>,
     /// активный AmneziaWG-тоннель (имя сервиса), если поднят legacy-движок.
     awg_tunnel: Option<String>,
-    /// awg-shim (userspace AmneziaWG → локальный SOCKS5), когда AWG-профиль
-    /// идёт через sing-box. Держим stdin-пайп: выход UniGate = EOF = шим
-    /// завершается сам, даже если мы не успели его убить.
+    /// Локальный SOCKS5-помощник sing-box: awg-shim или Xray.
     shim: Option<std::process::Child>,
     /// PID sing-box, запущенного от root на macOS в TUN-режиме (управляется
     /// сигнальным файлом, не через CommandChild).
@@ -274,6 +273,58 @@ fn awg_shim_exe() -> Option<std::path::PathBuf> {
     {
         None
     }
+}
+
+async fn start_xray_shim(app: &AppHandle, cfg: &serde_json::Value) -> Result<std::process::Child, String> {
+    #[cfg(target_os = "windows")]
+    const NAMES: &[&str] = &["xray-x86_64-pc-windows-msvc.exe", "xray.exe"];
+    #[cfg(target_os = "macos")]
+    const NAMES: &[&str] = &["xray"];
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    const NAMES: &[&str] = &[];
+    #[cfg(not(target_os = "macos"))]
+    let candidate = NAMES.iter().copied().find_map(binaries_file);
+    #[cfg(target_os = "macos")]
+    let candidate = std::env::current_exe().ok().and_then(|app| {
+        let dir = app.parent()?;
+        NAMES.iter().map(|name| dir.join(name)).find(|file| file.is_file())
+    }).or_else(|| {
+        if !cfg!(debug_assertions) { return None; }
+        let name = if cfg!(target_arch = "aarch64") { "xray-aarch64-apple-darwin" } else { "xray-x86_64-apple-darwin" };
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(name);
+        file.is_file().then_some(file)
+    });
+    let exe = candidate
+        .ok_or("Xray не найден рядом с UniGate")?;
+    storage::write_json(app, XRAY_TUN_CONF, cfg)?;
+    let path = storage::path(app, XRAY_TUN_CONF)?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("run").arg("-c").arg(&path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let result = async {
+        let mut child = cmd.spawn().map_err(|e| format!("не удалось запустить Xray: {e}"))?;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            if !matches!(child.try_wait(), Ok(None)) || tokio::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Xray не открыл локальный прокси для TUN".into());
+            }
+            if tokio::net::TcpStream::connect(("127.0.0.1", SHIM_PORT)).await.is_ok() {
+                return Ok(child);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        }
+    }.await;
+    let _ = std::fs::remove_file(path);
+    result
 }
 
 /// Запускает awg-shim: пишет .conf, стартует процесс со stdin-пайпом (умер
@@ -794,8 +845,8 @@ fn pin_awg_endpoint(
 
 /// Исключение на уровне маршрутов ОС надёжнее одного process_name-правила:
 /// Windows TUN не всегда определяет процесс для UDP-пакетов awg-shim.
-#[cfg(target_os = "windows")]
-fn exclude_awg_endpoint_from_tun(cfg: &mut serde_json::Value, ips: &[std::net::IpAddr]) {
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn exclude_endpoint_from_tun(cfg: &mut serde_json::Value, ips: &[std::net::IpAddr]) {
     let Some(tun) = cfg
         .get_mut("inbounds")
         .and_then(|v| v.as_array_mut())
@@ -944,6 +995,12 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     // поэтому здесь мак не блокируем.
     let settings = settings::load(&app)?;
     let mode = settings.mode;
+    let xhttp = profile.outbound.uses_xhttp();
+    if xhttp && !cfg!(any(target_os = "windows", target_os = "macos")) {
+        return Err("XHTTP пока доступен только на Windows и macOS".into());
+    }
+    let xray_tun = xhttp && mode == Mode::Tun;
+    let xray_proxy = xhttp && !xray_tun;
     #[cfg(not(target_os = "macos"))]
     if mode == Mode::Tun && !elevation::is_elevated() {
         let msg =
@@ -987,7 +1044,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         Vec::new()
     };
     #[cfg(target_os = "windows")]
-    let bootstrap_ips = if mode == Mode::Tun && awg_shim {
+    let bootstrap_ips = if mode == Mode::Tun && (awg_shim || xray_tun) {
         resolve_server_ips(&profile.outbound).await
     } else {
         Vec::new()
@@ -1035,6 +1092,24 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     // Профиль для генератора: AmneziaWG через шим для sing-box — обычный
     // SOCKS5-outbound на localhost
     let mut gen_profile = profile.clone();
+    let xray_shim = if xray_tun {
+        let Outbound::Vless { server, .. } = &profile.outbound else { unreachable!() };
+        let result = server.trim_matches(['[', ']']).parse::<std::net::IpAddr>().ok()
+            .or_else(|| bootstrap_ips.first().copied())
+            .ok_or("Не удалось определить IP XHTTP-сервера до запуска TUN".to_string())
+            .and_then(|ip| {
+                let password = uuid::Uuid::new_v4().to_string();
+                let cfg = config::xray_xhttp_tun_shim(&profile.outbound, SHIM_PORT, ip, &password)?;
+                gen_profile.outbound = Outbound::Socks {
+                    server: "127.0.0.1".into(), port: SHIM_PORT,
+                    username: Some("unigate".into()), password: Some(password),
+                };
+                Ok((ip, cfg))
+            });
+        Some(result.inspect_err(|message| {
+            set_state(&app, ConnectionState::Error { message: message.clone() });
+        })?)
+    } else { None };
     if awg_shim {
         gen_profile.outbound = Outbound::Socks {
             server: "127.0.0.1".into(),
@@ -1045,7 +1120,11 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     }
 
     // генерируем и пишем рабочий конфиг
-    let mut cfg = config::generate_with_vpn_routes(
+    let mut cfg = if xray_proxy {
+        config::xray_xhttp(&profile.outbound, LOCAL_PORT).inspect_err(|message| {
+            set_state(&app, ConnectionState::Error { message: message.clone() });
+        })?
+    } else { config::generate_with_vpn_routes(
         &gen_profile,
         mode,
         LOCAL_PORT,
@@ -1055,11 +1134,20 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         tun_ipv6,
         settings.tun_stack,
         &vpn_route_excludes,
-    );
+    ) };
 
     #[cfg(target_os = "windows")]
     if awg_shim && mode == Mode::Tun {
-        exclude_awg_endpoint_from_tun(&mut cfg, &awg_endpoint_ips);
+        exclude_endpoint_from_tun(&mut cfg, &awg_endpoint_ips);
+    }
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    if let Some((ip, _)) = &xray_shim {
+        exclude_endpoint_from_tun(&mut cfg, &[*ip]);
+        if let Some(outbound) = cfg["outbounds"].as_array_mut().and_then(|outbounds| {
+            outbounds.iter_mut().find(|outbound| outbound["tag"] == "proxy")
+        }) {
+            outbound["network"] = serde_json::json!("tcp");
+        }
     }
 
     // Трафик самого шима (UDP к AWG-серверу) обязан идти мимо TUN, иначе цикл:
@@ -1093,13 +1181,16 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     // логи ядра в файл — уровень warn (без адресов подключений, для траблшутинга).
     // Файл обнуляем перед стартом, чтобы хвост лога относился к текущему запуску
     // (его показываем в сообщении об ошибке при падении ядра).
-    if let Ok(log_path) = storage::path(&app, "sing-box.log") {
+    if let Some(log_path) = (!xray_proxy).then(|| storage::path(&app, "sing-box.log").ok()).flatten() {
         let _ = std::fs::write(&log_path, b"");
         cfg["log"] = serde_json::json!({
             "level": "warn",
             "timestamp": true,
             "output": log_path.to_string_lossy()
         });
+    }
+    if xray_proxy {
+        config::enable_xray_traffic(&mut cfg);
     }
     if let Err(e) = storage::write_json(&app, RUNNING_CONFIG, &cfg) {
         set_state(&app, ConnectionState::Error { message: e.clone() });
@@ -1116,7 +1207,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         if mode == Mode::Proxy {
             ports.push(LOCAL_PORT);
         }
-        if awg_shim {
+        if awg_shim || xray_tun {
             ports.push(SHIM_PORT);
         }
         for port in ports {
@@ -1133,6 +1224,11 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     // AmneziaWG: шим поднимаем ДО ядра — он резолвит endpoint системным
     // резолвером (наш TUN ещё не активен) и начинает слушать SOCKS5
     let mut shim_child: Option<std::process::Child> = None;
+    if let Some((_, cfg)) = &xray_shim {
+        shim_child = Some(start_xray_shim(&app, cfg).await.inspect_err(|message| {
+            set_state(&app, ConnectionState::Error { message: message.clone() });
+        })?);
+    }
     if awg_shim {
         if let Outbound::AmneziaWg { config: conf, .. } = &profile.outbound {
             match start_awg_shim(&app, shim_config.as_deref().unwrap_or(conf)).await {
@@ -1164,14 +1260,15 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     }
 
     // запускаем sing-box
+    let core = if xray_proxy { "xray" } else { "sing-box" };
     let spawn = app
         .shell()
-        .sidecar("sing-box")
-        .map_err(|e| format!("sidecar sing-box: {e}"))
+        .sidecar(core)
+        .map_err(|e| format!("sidecar {core}: {e}"))
         .and_then(|cmd| {
             cmd.args(["run", "-c", &path.to_string_lossy()])
                 .spawn()
-                .map_err(|e| format!("не удалось запустить sing-box: {e}"))
+                .map_err(|e| format!("не удалось запустить {core}: {e}"))
         });
 
     let (mut rx, child) = match spawn {
@@ -1184,6 +1281,23 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
             return Err(e);
         }
     };
+
+    if xray_proxy {
+        let readiness = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if tokio::net::TcpStream::connect(("127.0.0.1", LOCAL_PORT)).await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            }
+        }).await;
+        if readiness.is_err() {
+            let _ = child.kill();
+            let message = "Xray не открыл локальный прокси. Проверьте параметры XHTTP.".to_string();
+            set_state(&app, ConnectionState::Error { message: message.clone() });
+            return Err(message);
+        }
+    }
 
     {
         let conn = app.state::<Connection>();
@@ -1217,7 +1331,11 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     let _ = app.emit(EVENT, ConnectionState::Connected);
 
     // запускаем опрос статистики (живёт, пока Connected)
-    stats::start_polling(app.clone());
+    if xray_proxy {
+        stats::start_polling_for(app.clone(), stats::Source::Xray);
+    } else {
+        stats::start_polling(app.clone());
+    }
 
     // следим за неожиданным завершением процесса
     let app_watch = app.clone();
@@ -1233,7 +1351,8 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
                     let line = String::from_utf8_lossy(&bytes);
                     let line = line.trim();
                     if !line.is_empty() {
-                        eprintln!("[sing-box] {line}");
+                        if xray_proxy { continue; }
+                        eprintln!("[{core}] {line}");
                         if stderr_tail.len() == 5 {
                             stderr_tail.pop_front();
                         }
@@ -1255,8 +1374,8 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
                     kill_shim(&app_watch);
                     if unexpected {
                         let _ = sysproxy::disable();
-                        let mut msg = format!("sing-box завершился (код {:?})", payload.code);
-                        if let Some(tail) = log_tail(&app_watch, 5) {
+                        let mut msg = format!("{core} завершился (код {:?})", payload.code);
+                        if let Some(tail) = (!xray_proxy).then(|| log_tail(&app_watch, 5)).flatten() {
                             msg = format!("{msg}\n{tail}");
                         } else if !stderr_tail.is_empty() {
                             let tail: Vec<String> = stderr_tail.iter().cloned().collect();
@@ -1613,7 +1732,7 @@ pub async fn disconnect(app: AppHandle) -> Result<ConnectionState, String> {
             }
         }
         if let Some(pid) = shim_pid {
-            match terminate_windows_process(pid, "AWG-движок") {
+            match terminate_windows_process(pid, "локальный прокси-помощник") {
                 Ok(()) => {
                     let conn = app.state::<Connection>();
                     if let Ok(mut guard) = conn.0.lock() {
@@ -1741,7 +1860,7 @@ mod tests {
             }]
         });
         let ip = "203.0.113.10".parse().unwrap();
-        super::exclude_awg_endpoint_from_tun(&mut cfg, &[ip, ip]);
+        super::exclude_endpoint_from_tun(&mut cfg, &[ip, ip]);
         assert_eq!(
             cfg["inbounds"][0]["route_exclude_address"],
             serde_json::json!(["192.168.0.0/16", "203.0.113.10/32"])

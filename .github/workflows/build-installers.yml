@@ -85,6 +85,14 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.exe.sig
 
+      - name: Verify macOS bundle contains the Xray sidecar
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          xray="src-tauri/target/release/bundle/macos/UniGate.app/Contents/MacOS/xray"
+          test -x "$xray"
+          "$xray" version | grep '^Xray 26.11.9 '
+
       # Инсталлер macOS: .dmg (неподписанный — Gatekeeper потребует
       # «ПКМ → Открыть» при первом запуске; подпись/нотаризация — отдельно)
       - name: Upload macOS installer

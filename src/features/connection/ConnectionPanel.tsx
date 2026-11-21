@@ -4,8 +4,10 @@ import { formatBytes, formatSpeed } from "../../lib/format";
 import { ipc } from "../../lib/ipc";
 import type { ConnectionState, Outbound, Profile } from "../../lib/types";
 import { ProfileForm } from "../profiles/ProfileForm";
-import { ImportDialog } from "../profiles/ImportDialog";
+import { VpnImportDialog } from "../profiles/VpnImportDialog";
 import { displayError, useI18n } from "../../lib/i18n";
+import { ProfileQr } from "../../components/ProfileQr";
+import { ProfileEditorModal } from "../../components/ProfileEditorModal";
 
 type ShareFormat = "link" | "json";
 
@@ -103,20 +105,19 @@ export function ConnectionPanel() {
           ))}
         </select>
         <div className="profile-picker-actions">
-          <button onClick={() => setEditor("import")}>{t("common.import")}</button>
-          <button onClick={() => setEditor("create")}>+ {t("common.add")}</button>
+          <button onClick={() => setEditor("import")}>+ VPN</button>
+          <button onClick={() => setEditor("create")}>+ {t("vpn.proxy")}</button>
         </div>
       </section>
 
-      {editor === "import" && (
-        <section className="core-card compact-editor">
-          <ImportDialog onDone={() => setEditor(null)} onCancel={() => setEditor(null)} />
-        </section>
-      )}
-      {editor === "create" && (
-        <section className="core-card compact-editor">
-          <ProfileForm onSubmit={handleCreate} onCancel={() => setEditor(null)} />
-        </section>
+      {editor && (
+        <ProfileEditorModal title={editor === "import" ? "+ VPN" : `+ ${t("vpn.proxy")}`} onClose={() => setEditor(null)}>
+          {editor === "import" ? (
+            <VpnImportDialog onDone={() => setEditor(null)} onCancel={() => setEditor(null)} />
+          ) : (
+            <ProfileForm onSubmit={handleCreate} onCancel={() => setEditor(null)} />
+          )}
+        </ProfileEditorModal>
       )}
 
       {shared && (
@@ -140,6 +141,7 @@ export function ConnectionPanel() {
             </div>
           )}
           <textarea className="import-input" readOnly rows={shared.format === "json" ? 8 : 3} value={shared.content} />
+          {shared.format === "link" && <ProfileQr key={shared.id} value={shared.content} t={t} />}
           <button type="button" onClick={() => navigator.clipboard.writeText(shared.content)}>
             {t("common.copy")}
           </button>

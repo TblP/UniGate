@@ -13,6 +13,7 @@ object VpnQuickControl {
     data class SavedConnection(
         val config: String,
         val awgConfig: String?,
+        val xrayConfig: String?,
         val profileName: String,
         val includePackages: List<String>,
         val excludePackages: List<String>,
@@ -41,6 +42,7 @@ object VpnQuickControl {
         context: Context,
         config: String,
         awgConfig: String?,
+        xrayConfig: String?,
         profileName: String,
         includePackages: List<String>,
         excludePackages: List<String>,
@@ -49,6 +51,7 @@ object VpnQuickControl {
             .edit()
             .putString(KEY_CONFIG, config)
             .putString(KEY_AWG_CONFIG, awgConfig)
+            .putString("xrayConfig", xrayConfig)
             .putString(KEY_PROFILE_NAME, profileName)
             .putStringSet(KEY_INCLUDE_PACKAGES, includePackages.toSet())
             .putStringSet(KEY_EXCLUDE_PACKAGES, excludePackages.toSet())
@@ -66,6 +69,7 @@ object VpnQuickControl {
         return SavedConnection(
             config = config,
             awgConfig = prefs.getString(KEY_AWG_CONFIG, null)?.takeIf { it.isNotBlank() },
+            xrayConfig = prefs.getString("xrayConfig", null)?.takeIf { it.isNotBlank() },
             profileName = prefs.getString(KEY_PROFILE_NAME, "UniGate").orEmpty().ifBlank { "UniGate" },
             includePackages = prefs.getStringSet(KEY_INCLUDE_PACKAGES, emptySet()).orEmpty().toList(),
             excludePackages = prefs.getStringSet(KEY_EXCLUDE_PACKAGES, emptySet()).orEmpty().toList(),
@@ -112,6 +116,7 @@ object VpnQuickControl {
             action = UniGateVpnService.ACTION_START
             putExtra(UniGateVpnService.EXTRA_CONFIG, connection.config)
             putExtra(UniGateVpnService.EXTRA_AWG_CONFIG, connection.awgConfig)
+            putExtra(UniGateVpnService.EXTRA_XRAY_CONFIG, connection.xrayConfig)
             putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, connection.profileName)
             putExtra(UniGateVpnService.EXTRA_START_TOKEN, UniGateVpnService.beginStart())
             putStringArrayListExtra(

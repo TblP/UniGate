@@ -13,7 +13,8 @@ export interface TlsOpts {
 
 export type Transport =
   | { type: "ws"; path?: string; host?: string }
-  | { type: "grpc"; serviceName?: string };
+  | { type: "grpc"; serviceName?: string }
+  | { type: "xhttp"; path?: string | null; host?: string | null; mode?: string | null; extra?: unknown };
 
 export type Outbound =
   | {
@@ -77,6 +78,13 @@ export type Outbound =
       transport?: Transport;
     }
   | {
+      type: "naive";
+      server: string;
+      port: number;
+      username: string;
+      password: string;
+    }
+  | {
       type: "tuic";
       server: string;
       port: number;
@@ -107,6 +115,7 @@ export interface Subscription {
   url: string;
   /** Число профилей из подписки. */
   count: number;
+  skipped?: number;
   /** UNIX-время последнего обновления (сек). */
   updatedAt?: number;
 }

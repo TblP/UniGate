@@ -7,11 +7,13 @@
     "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/sing-box",
+      "binaries/xray",
       "binaries/amneziawg",
       "binaries/awg-shim"
     ],
     "resources": {
       "binaries/wintun.dll": "",
+      "binaries/libcronet.dll": "",
       "binaries/geoip-ru.srs": ""
     }
   },
