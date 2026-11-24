@@ -1,15 +1,15 @@
-// Minimal SOCKS5 server (RFC 1928, no auth) dialing through netstack:
-// CONNECT for TCP, UDP ASSOCIATE for UDP. Enough for sing-box's socks
-// outbound; BIND is not implemented.
+// SOCKS5 server dialing through the AmneziaWG netstack.
 package awgshim
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -20,6 +20,12 @@ import (
 const (
 	cmdConnect      = 0x01
 	cmdUDPAssociate = 0x03
+
+	authNone        = 0x00
+	authPassword    = 0x02
+	authUnavailable = 0xff
+
+	uotAddress = "sp.udp-over-tcp.arpa:0"
 
 	atypIPv4   = 0x01
 	atypDomain = 0x03
@@ -35,7 +41,8 @@ const (
 )
 
 type socksServer struct {
-	tnet *netstack.Net
+	tnet     *netstack.Net
+	password string
 }
 
 func (s *socksServer) serve(ln net.Listener) error {
@@ -61,7 +68,18 @@ func (s *socksServer) handle(c net.Conn) {
 	if _, err := io.ReadFull(c, methods); err != nil {
 		return
 	}
-	if _, err := c.Write([]byte{0x05, 0x00}); err != nil { // no auth
+	method := byte(authNone)
+	if s.password != "" {
+		method = authPassword
+	}
+	if !slices.Contains(methods, method) {
+		_, _ = c.Write([]byte{0x05, authUnavailable})
+		return
+	}
+	if _, err := c.Write([]byte{0x05, method}); err != nil {
+		return
+	}
+	if method == authPassword && !s.authenticate(c) {
 		return
 	}
 
@@ -79,12 +97,51 @@ func (s *socksServer) handle(c net.Conn) {
 
 	switch req[1] {
 	case cmdConnect:
-		s.handleConnect(c, dst)
+		if s.password != "" && dst == uotAddress {
+			s.handleUOT(c)
+		} else {
+			s.handleConnect(c, dst)
+		}
 	case cmdUDPAssociate:
+		if s.password != "" {
+			_ = writeReply(c, repCmdNotSupported)
+			return
+		}
 		s.handleUDP(c)
 	default:
 		_ = writeReply(c, repCmdNotSupported)
 	}
+}
+
+func (s *socksServer) authenticate(c net.Conn) bool {
+	var version [1]byte
+	if _, err := io.ReadFull(c, version[:]); err != nil || version[0] != 0x01 {
+		return false
+	}
+	username, err := readAuthField(c)
+	if err != nil {
+		return false
+	}
+	password, err := readAuthField(c)
+	if err != nil {
+		return false
+	}
+	status := byte(1)
+	if string(username) == "unigate" && subtle.ConstantTimeCompare(password, []byte(s.password)) == 1 {
+		status = 0
+	}
+	_, err = c.Write([]byte{0x01, status})
+	return err == nil && status == 0
+}
+
+func readAuthField(c io.Reader) ([]byte, error) {
+	var size [1]byte
+	if _, err := io.ReadFull(c, size[:]); err != nil {
+		return nil, err
+	}
+	value := make([]byte, size[0])
+	_, err := io.ReadFull(c, value)
+	return value, err
 }
 
 func (s *socksServer) handleConnect(c net.Conn, dst string) {
@@ -111,8 +168,9 @@ func (s *socksServer) handleConnect(c net.Conn, dst string) {
 // ---------------------------------------------------------------------------
 
 type udpAssoc struct {
-	mu    sync.Mutex
-	conns map[netip.AddrPort]net.Conn // destination -> netstack socket
+	mu     sync.Mutex
+	conns  map[netip.AddrPort]net.Conn // destination -> netstack socket
+	closed bool
 }
 
 func (s *socksServer) handleUDP(c net.Conn) {
@@ -138,11 +196,7 @@ func (s *socksServer) handleUDP(c net.Conn) {
 	// the association lives as long as the control connection
 	_, _ = io.Copy(io.Discard, c)
 	relay.Close()
-	assoc.mu.Lock()
-	for _, rc := range assoc.conns {
-		rc.Close()
-	}
-	assoc.mu.Unlock()
+	assoc.close()
 }
 
 func (s *socksServer) relayLoop(relay *net.UDPConn, assoc *udpAssoc) {
@@ -162,41 +216,112 @@ func (s *socksServer) relayLoop(relay *net.UDPConn, assoc *udpAssoc) {
 		if err != nil {
 			continue
 		}
-		dstAP, err := s.resolveUDP(dst)
-		if err != nil {
-			continue
-		}
-
-		assoc.mu.Lock()
-		rc := assoc.conns[dstAP]
-		if rc == nil {
-			rc, err = s.tnet.DialUDP(nil, &net.UDPAddr{
-				IP:   dstAP.Addr().AsSlice(),
-				Port: int(dstAP.Port()),
-			})
-			if err != nil {
-				assoc.mu.Unlock()
-				continue
-			}
-			assoc.conns[dstAP] = rc
-			go pumpReplies(relay, client, dstAP, rc, assoc)
-		}
-		assoc.mu.Unlock()
-		_ = rc.SetReadDeadline(time.Now().Add(udpIdleTimeout))
-		_, _ = rc.Write(payload)
+		peer := client
+		s.forwardUDP(assoc, dst, payload, func(from netip.AddrPort, data []byte) error {
+			_, err := relay.WriteToUDP(append(udpHeader(from), data...), peer)
+			return err
+		})
 	}
 }
 
-// pumpReplies forwards datagrams coming back from one destination to the
-// client, wrapped in the SOCKS5 UDP header. Exits on idle timeout or close.
-func pumpReplies(relay *net.UDPConn, client *net.UDPAddr, dst netip.AddrPort, rc net.Conn, assoc *udpAssoc) {
+func (s *socksServer) handleUOT(c net.Conn) {
+	if err := writeReply(c, repOK); err != nil {
+		return
+	}
+	assoc := &udpAssoc{conns: make(map[netip.AddrPort]net.Conn)}
+	defer assoc.close()
+	payload := make([]byte, 65535)
+	var writeMu sync.Mutex
+	reply := func(from netip.AddrPort, data []byte) error {
+		atyp := byte(0)
+		if from.Addr().Is6() {
+			atyp = 1
+		}
+		packet := append([]byte{atyp}, from.Addr().AsSlice()...)
+		packet = binary.BigEndian.AppendUint16(packet, from.Port())
+		packet = binary.BigEndian.AppendUint16(packet, uint16(len(data)))
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		_, err := c.Write(append(packet, data...))
+		return err
+	}
+	for {
+		dst, length, err := readUOTHeader(c)
+		if err != nil {
+			return
+		}
+		if _, err := io.ReadFull(c, payload[:length]); err != nil {
+			return
+		}
+		s.forwardUDP(assoc, dst, payload[:length], reply)
+	}
+}
+
+// UoT v1 differs from the SOCKS address encoding only in the type byte.
+// https://sing-box.sagernet.org/configuration/shared/udp-over-tcp/
+func readUOTHeader(r io.Reader) (string, int, error) {
+	var kind [1]byte
+	if _, err := io.ReadFull(r, kind[:]); err != nil {
+		return "", 0, err
+	}
+	kinds := [...]byte{atypIPv4, atypIPv6, atypDomain}
+	if int(kind[0]) >= len(kinds) {
+		return "", 0, fmt.Errorf("invalid UoT address type")
+	}
+	dst, err := readAddr(r, kinds[kind[0]])
+	if err != nil {
+		return "", 0, err
+	}
+	var size [2]byte
+	if _, err := io.ReadFull(r, size[:]); err != nil {
+		return "", 0, err
+	}
+	return dst, int(binary.BigEndian.Uint16(size[:])), nil
+}
+
+func (assoc *udpAssoc) close() {
+	assoc.mu.Lock()
+	defer assoc.mu.Unlock()
+	assoc.closed = true
+	for _, conn := range assoc.conns {
+		_ = conn.Close()
+	}
+}
+
+func (s *socksServer) forwardUDP(assoc *udpAssoc, dst string, payload []byte, reply func(netip.AddrPort, []byte) error) {
+	addr, err := s.resolveUDP(dst)
+	if err != nil {
+		return
+	}
+	assoc.mu.Lock()
+	if assoc.closed {
+		assoc.mu.Unlock()
+		return
+	}
+	conn := assoc.conns[addr]
+	if conn == nil {
+		conn, err = s.tnet.DialUDPAddrPort(netip.AddrPort{}, addr)
+		if err != nil {
+			assoc.mu.Unlock()
+			return
+		}
+		assoc.conns[addr] = conn
+		go pumpReplies(addr, conn, assoc, reply)
+	}
+	assoc.mu.Unlock()
+	_ = conn.SetReadDeadline(time.Now().Add(udpIdleTimeout))
+	_, _ = conn.Write(payload)
+}
+
+// pumpReplies exits on idle timeout or close.
+func pumpReplies(dst netip.AddrPort, rc net.Conn, assoc *udpAssoc, reply func(netip.AddrPort, []byte) error) {
 	defer func() {
 		assoc.mu.Lock()
 		delete(assoc.conns, dst)
 		assoc.mu.Unlock()
 		rc.Close()
 	}()
-	hdr := udpHeader(dst)
 	buf := make([]byte, 65535)
 	for {
 		_ = rc.SetReadDeadline(time.Now().Add(udpIdleTimeout))
@@ -204,8 +329,7 @@ func pumpReplies(relay *net.UDPConn, client *net.UDPAddr, dst netip.AddrPort, rc
 		if err != nil {
 			return
 		}
-		pkt := append(append([]byte{}, hdr...), buf[:n]...)
-		if _, err := relay.WriteToUDP(pkt, client); err != nil {
+		if err := reply(dst, buf[:n]); err != nil {
 			return
 		}
 	}

@@ -76,7 +76,12 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         @Volatile
         private var liveState = VpnQuickControl.State.OFF
 
+        @Volatile
+        private var trafficSecret: String? = null
+
         fun runtimeState(): VpnQuickControl.State = liveState
+
+        fun clashApiSecret(): String? = trafficSecret
 
         fun beginStart(): Long = synchronized(startMonitor) {
             startSequence += 1
@@ -214,6 +219,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         excludePackages: List<String>,
     ) {
         closeCore()
+        val localConfig = VpnLocalConfig.prepare(config, !awgConfig.isNullOrBlank())
         if (!xrayConfig.isNullOrBlank()) {
             Xraybridge.start(xrayConfig, object : XrayProtector {
                 override fun protect(fd: Long): Boolean =
@@ -221,9 +227,10 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
             })
         }
         if (!awgConfig.isNullOrBlank()) {
-            Awgshim.start(
+            Awgshim.startAuthenticated(
                 awgConfig,
                 "127.0.0.1:2081",
+                requireNotNull(localConfig.awgPassword),
                 object : Protector {
                     override fun protect(fd: Long): Boolean =
                         this@UniGateVpnService.protect(fd.toInt())
@@ -233,6 +240,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         setupLibbox()
 
         val server = CommandServer(this, this)
+        commandServer = server
         server.start()
         val overrideOptions = OverrideOptions().apply {
             if (includePackages.isNotEmpty()) {
@@ -241,8 +249,8 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
                 excludePackage = ListStringIterator(excludePackages)
             }
         }
-        server.startOrReloadService(config, overrideOptions)
-        commandServer = server
+        server.startOrReloadService(localConfig.json, overrideOptions)
+        trafficSecret = localConfig.clashSecret
     }
 
     private fun setupLibbox() {
@@ -298,6 +306,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     }
 
     private fun closeCore() {
+        trafficSecret = null
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null

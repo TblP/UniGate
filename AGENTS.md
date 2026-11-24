@@ -103,7 +103,7 @@ React UI  --IPC-->  Rust (Tauri)  --spawn/JSON-->  sing-box  --сеть-->  ин
 - [x] Опрос `/connections` раз в секунду, расчёт скорости из дельты, события `traffic` (reqwest) — [stats.rs](src-tauri/src/stats.rs)
 - [x] Реалтайм ↓/↑ скорость + суммарный трафик за сессию в ConnectionPanel; сброс при отключении
 - **Готово:** в UI бежит живая статистика — проверено реально.
-- **Заметки:** Clash API без секрета (только localhost); порт 9090 фиксированный — при конфликте сделать настраиваемым.
+- **Заметки:** Clash API слушает localhost и требует случайный токен подключения; порт 9090 фиксированный — при конфликте сделать настраиваемым.
 
 ### Phase 6 — Импорт / экспорт / подписки 💾 ✅ ГОТОВО
 - [x] Парсинг share-ссылок: `hysteria2://`, `vless://`, `vmess://`, `ss://`, `trojan://`, `tuic://` + `vpn://` Amnezia (Phase 4 + 8 + 7c, [import.rs](src-tauri/src/import.rs))
@@ -141,6 +141,7 @@ React UI  --IPC-->  Rust (Tauri)  --spawn/JSON-->  sing-box  --сеть-->  ин
 
 **AmneziaWG через awg-shim — split-tunneling и статистика (июль 2026; шим проверен standalone реально, связка в приложении ⏳ ждёт проверки):**
 - **Архитектура:** свой Go-шим [awg-shim/](awg-shim/) — userspace AmneziaWG (`amneziawg-go` + gVisor netstack, БЕЗ TUN-адаптера и прав) торчит локальным **SOCKS5 с TCP CONNECT и UDP ASSOCIATE** на 127.0.0.1:2081. sing-box остаётся мозгом маршрутизации: для него AWG-профиль превращается в socks-outbound ([connection.rs](src-tauri/src/connection.rs) `gen_profile`) → **весь split (LAN/RU/per-app), статистика Clash API и proxy-режим (без админа!) работают для AmneziaWG** как для остальных протоколов.
+- **Защита локальных интерфейсов (1.2.4):** для SOCKS5 AmneziaWG UniGate генерирует пароль на каждое подключение. UDP передаётся через тот же авторизованный TCP-транспорт между sing-box и помощником. Android применяет защиту при старте VPN, включая восстановление старых сохранённых подключений.
 - **Анти-петля:** трафик самого шима обязан идти мимо TUN — в route.rules вставляются (после sniff/hijack-dns) правила `process_name=<имя шима>` → direct и `ip_cidr=<IP сервера>/32` → direct.
 - **Windows + доменный AWG Endpoint:** перед запуском TUN домен резолвится системным DNS, выбранный IP закрепляется в рабочем конфиге шима на эту сессию и добавляется в `tun.route_exclude_address` вместе с direct-правилом. На следующем подключении DNS проверяется снова. Если IP определить не удалось, подключение прерывается до создания TUN, чтобы не зациклить трафик.
 - **Windows release-сборка:** `tauri.windows.conf.json` пересобирает `awg-shim` перед сборкой фронтенда. Нельзя упаковывать старый бинарник из `src-tauri/binaries`: версия `amneziawg-go v0.2.19` отвергает диапазон `PersistentKeepalive = 25-35` из AWG 3.1, из-за чего не запускаются даже профили с IP endpoint. Интеграционный Go-тест проверяет передачу диапазона до `device.IpcSet`.

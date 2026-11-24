@@ -45,6 +45,18 @@ var active struct {
 // Start launches the userspace AmneziaWG engine and its local SOCKS5 server.
 // It returns the actual listen address after the engine is ready.
 func Start(configText, listen string, protector Protector) (string, error) {
+	return start(configText, listen, "", protector)
+}
+
+// StartAuthenticated uses password-protected SOCKS5 for TCP and UDP over TCP.
+func StartAuthenticated(configText, listen, password string, protector Protector) (string, error) {
+	if len(password) == 0 || len(password) > 255 {
+		return "", fmt.Errorf("invalid SOCKS5 password length")
+	}
+	return start(configText, listen, password, protector)
+}
+
+func start(configText, listen, password string, protector Protector) (string, error) {
 	Stop()
 	if strings.TrimSpace(listen) == "" {
 		listen = "127.0.0.1:2081"
@@ -72,7 +84,7 @@ func Start(configText, listen string, protector Protector) (string, error) {
 		return "", fmt.Errorf("device up: %w", err)
 	}
 
-	srv := &socksServer{tnet: tnet}
+	srv := &socksServer{tnet: tnet, password: password}
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		dev.Close()

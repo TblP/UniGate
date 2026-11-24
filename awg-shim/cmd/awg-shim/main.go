@@ -14,6 +14,7 @@ import (
 func main() {
 	confPath := flag.String("conf", "", "path to AmneziaWG/WireGuard .conf")
 	listen := flag.String("listen", "127.0.0.1:2081", "SOCKS5 listen address")
+	requireAuth := flag.Bool("require-auth", false, "require the UniGate SOCKS5 session password")
 	flag.Bool("verbose", false, "reserved for compatibility")
 	flag.Parse()
 	if *confPath == "" {
@@ -23,7 +24,12 @@ func main() {
 	if err != nil {
 		fatal("read conf: %v", err)
 	}
-	addr, err := awgshim.Start(string(raw), *listen, nil)
+	var addr string
+	if *requireAuth {
+		addr, err = awgshim.StartAuthenticated(string(raw), *listen, os.Getenv("UNIGATE_AWG_SHIM_PASSWORD"), nil)
+	} else {
+		addr, err = awgshim.Start(string(raw), *listen, nil)
+	}
 	if err != nil {
 		fatal("%v", err)
 	}

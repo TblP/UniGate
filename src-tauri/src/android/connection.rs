@@ -59,6 +59,20 @@ struct StatusResponse {
 }
 
 #[derive(Deserialize)]
+struct ClashApiSecret {
+    secret: Option<String>,
+}
+
+pub async fn clash_api_secret(app: &AppHandle) -> Option<String> {
+    app.state::<VpnPlugin<tauri::Wry>>()
+        .0
+        .run_mobile_plugin_async::<ClashApiSecret>("clashApiSecret", ())
+        .await
+        .ok()
+        .and_then(|response| response.secret)
+}
+
+#[derive(Deserialize)]
 struct QuickTileResponse {
     added: bool,
 }

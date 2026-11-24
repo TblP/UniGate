@@ -60,11 +60,23 @@ pub struct Traffic {
 }
 
 /// Запускает фоновый опрос статистики; живёт, пока состояние == Connected.
-pub fn start_polling(app: AppHandle) {
-    start_polling_for(app, Source::SingBox);
+pub fn start_polling(
+    app: AppHandle,
+    #[cfg(not(target_os = "android"))] secret: String,
+) {
+    start_polling_for(
+        app,
+        Source::SingBox,
+        #[cfg(not(target_os = "android"))]
+        Some(secret),
+    );
 }
 
-pub fn start_polling_for(app: AppHandle, source: Source) {
+pub fn start_polling_for(
+    app: AppHandle,
+    source: Source,
+    #[cfg(not(target_os = "android"))] secret: Option<String>,
+) {
     let session = POLL_SESSION.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     tauri::async_runtime::spawn(async move {
         let Ok(client) = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(2)).build() else { return };
@@ -77,7 +89,20 @@ pub fn start_polling_for(app: AppHandle, source: Source) {
                 break;
             }
 
-            let value: Option<Value> = match client.get(&url).send().await {
+            let request = client.get(&url);
+            #[cfg(target_os = "android")]
+            let request = {
+                let Some(secret) = connection::clash_api_secret(&app).await else {
+                    continue;
+                };
+                request.bearer_auth(secret)
+            };
+            #[cfg(not(target_os = "android"))]
+            let request = match &secret {
+                Some(secret) => request.bearer_auth(secret),
+                None => request,
+            };
+            let value: Option<Value> = match request.send().await {
                 Ok(resp) if resp.status().is_success() => resp.json().await.ok(),
                 _ => None,
             };

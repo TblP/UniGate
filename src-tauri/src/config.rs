@@ -97,6 +97,11 @@ fn clash_api() -> Value {
     json!({ "clash_api": { "external_controller": format!("127.0.0.1:{CLASH_API_PORT}") } })
 }
 
+#[cfg(not(target_os = "android"))]
+pub fn protect_clash_api(config: &mut Value, secret: &str) {
+    config["experimental"]["clash_api"]["secret"] = json!(secret);
+}
+
 /// Proxy mode: локальный `mixed`-inbound + системный прокси (без админа).
 fn generate_proxy(profile: &Profile, local_port: u16) -> Value {
     json!({

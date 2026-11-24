@@ -108,6 +108,13 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun clashApiSecret(invoke: Invoke) {
+        invoke.resolve(JSObject().apply {
+            UniGateVpnService.clashApiSecret()?.let { put("secret", it) }
+        })
+    }
+
+    @Command
     fun requestQuickTile(invoke: Invoke) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             invoke.resolve(JSObject().apply { put("added", false) })

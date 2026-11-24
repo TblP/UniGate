@@ -407,7 +407,7 @@ async fn start_xray_shim(app: &AppHandle, cfg: &serde_json::Value) -> Result<std
 /// Запускает awg-shim: пишет .conf, стартует процесс со stdin-пайпом (умер
 /// UniGate → закрылся пайп → шим выходит сам) и ждёт строку `READY` — к этому
 /// моменту endpoint разрезолвлен и SOCKS5 слушает. Ошибка старта — из stderr.
-async fn start_awg_shim(app: &AppHandle, conf: &str) -> Result<std::process::Child, String> {
+async fn start_awg_shim(app: &AppHandle, conf: &str, password: &str) -> Result<std::process::Child, String> {
     let exe = awg_shim_exe().ok_or("awg-shim не найден рядом с приложением")?;
     let conf_path = storage::path(app, SHIM_CONF)?;
     std::fs::write(&conf_path, conf)
@@ -418,6 +418,8 @@ async fn start_awg_shim(app: &AppHandle, conf: &str) -> Result<std::process::Chi
         .arg(&conf_path)
         .arg("--listen")
         .arg(format!("127.0.0.1:{SHIM_PORT}"))
+        .arg("--require-auth")
+        .env("UNIGATE_AWG_SHIM_PASSWORD", password)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -1188,12 +1190,13 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
             set_state(&app, ConnectionState::Error { message: message.clone() });
         })?)
     } else { None };
-    if awg_shim {
+    let awg_password = awg_shim.then(|| uuid::Uuid::new_v4().to_string());
+    if let Some(password) = &awg_password {
         gen_profile.outbound = Outbound::Socks {
             server: "127.0.0.1".into(),
             port: SHIM_PORT,
-            username: None,
-            password: None,
+            username: Some("unigate".into()),
+            password: Some(password.clone()),
         };
     }
 
@@ -1213,6 +1216,14 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         settings.tun_stack,
         &vpn_route_excludes,
     ) };
+
+    let clash_secret = uuid::Uuid::new_v4().to_string();
+    if !xray_proxy {
+        config::protect_clash_api(&mut cfg, &clash_secret);
+    }
+    if awg_shim {
+        cfg["outbounds"][0]["udp_over_tcp"] = serde_json::json!({ "enabled": true, "version": 1 });
+    }
 
     #[cfg(target_os = "windows")]
     if awg_shim && mode == Mode::Tun {
@@ -1307,7 +1318,8 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
     }
     if awg_shim {
         if let Outbound::AmneziaWg { config: conf, .. } = &profile.outbound {
-            match start_awg_shim(&app, shim_config.as_deref().unwrap_or(conf)).await {
+            let password = awg_password.as_deref().expect("AWG shim password");
+            match start_awg_shim(&app, shim_config.as_deref().unwrap_or(conf), password).await {
                 Ok(c) => shim_child = Some(c),
                 Err(e) => {
                     set_state(&app, ConnectionState::Error { message: e.clone() });
@@ -1328,7 +1340,7 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
             let mut guard = conn.0.lock().map_err(|e| e.to_string())?;
             guard.shim = Some(shim);
         }
-        let result = connect_tun_macos(&app, &path);
+        let result = connect_tun_macos(&app, &path, clash_secret);
         if result.is_err() {
             kill_shim(&app);
         }
@@ -1415,9 +1427,9 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
 
     // запускаем опрос статистики (живёт, пока Connected)
     if xray_proxy {
-        stats::start_polling_for(app.clone(), stats::Source::Xray);
+        stats::start_polling_for(app.clone(), stats::Source::Xray, None);
     } else {
-        stats::start_polling(app.clone());
+        stats::start_polling(app.clone(), clash_secret);
     }
 
     // следим за неожиданным завершением процесса
@@ -1482,7 +1494,11 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
 /// macOS TUN: поднимаем sing-box от root через osascript. Системный прокси НЕ
 /// ставим (роутит сам utun). Статистика идёт через Clash API как обычно.
 #[cfg(target_os = "macos")]
-fn connect_tun_macos(app: &AppHandle, cfg_path: &std::path::Path) -> Result<ConnectionState, String> {
+fn connect_tun_macos(
+    app: &AppHandle,
+    cfg_path: &std::path::Path,
+    clash_secret: String,
+) -> Result<ConnectionState, String> {
     let fail = |app: &AppHandle, msg: String| -> Result<ConnectionState, String> {
         set_state(app, ConnectionState::Error { message: msg.clone() });
         Err(msg)
@@ -1528,7 +1544,7 @@ fn connect_tun_macos(app: &AppHandle, cfg_path: &std::path::Path) -> Result<Conn
         guard.state = ConnectionState::Connected;
     }
     let _ = app.emit(EVENT, ConnectionState::Connected);
-    stats::start_polling(app.clone());
+    stats::start_polling(app.clone(), clash_secret);
 
     // Следим за root-процессом: CommandChild-событий у него нет, поэтому поллим
     // PID. Если ядро умерло, а мы всё ещё «Connected» — показываем ошибку с логом.
