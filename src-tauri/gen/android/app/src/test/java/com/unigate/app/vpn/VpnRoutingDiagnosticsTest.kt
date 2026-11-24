@@ -20,6 +20,20 @@ class VpnRoutingDiagnosticsTest {
     }
 
     @Test
+    fun reportsOwnerChecksWithoutExposingOtherPackageNames() {
+        val checks = VpnOwnerChecks(listOf("org.example.chat", "org.example.radio"))
+        checks.record(listOf("org.example.chat"))
+        checks.record(listOf("org.example.shared", "org.example.radio"))
+        checks.record(listOf("org.example.excluded"))
+        checks.record(emptyList())
+
+        val report = VpnRoutingDiagnostics("app", "only", listOf("org.example.chat", "org.example.radio"), checks)
+            .render(36, "16", "on")
+        assertTrue(report.contains("Owner checks: selected=2, other=1, unknown=1"))
+        assertTrue(!report.contains("org.example.excluded"))
+    }
+
+    @Test
     fun showsAppliedExclusionsAndAStoppedVpn() {
         val report = VpnRoutingDiagnostics("app", "except", listOf("org.example.checker"))
             .withResult(emptyList(), listOf("org.example.checker"), emptyList(), true)

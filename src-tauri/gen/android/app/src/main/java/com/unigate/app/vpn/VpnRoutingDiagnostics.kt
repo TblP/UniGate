@@ -1,9 +1,12 @@
 package com.unigate.app.vpn
 
+import java.util.concurrent.atomic.AtomicInteger
+
 internal data class VpnRoutingDiagnostics(
     val source: String,
     val requestedMode: String,
     val requestedPackages: List<String>,
+    val ownerChecks: VpnOwnerChecks? = null,
     val appliedMode: String? = null,
     val appliedPackages: List<String>? = null,
     val missingPackages: List<String> = emptyList(),
@@ -38,8 +41,27 @@ internal data class VpnRoutingDiagnostics(
             "Applied packages: ${appliedPackages?.display() ?: "(not received)"}",
             "Missing packages: ${missingPackages.display()}",
             "TUN established: $tunEstablished",
-        ).joinToString("\n")
+            "In-core app guard: ${if (ownerChecks != null) "enabled" else "inactive"}",
+            ownerChecks?.render(),
+        ).filterNotNull().joinToString("\n")
     }
 
     private fun List<String>.display() = sorted().joinToString(", ").ifEmpty { "(none)" }
+}
+
+internal class VpnOwnerChecks(allowed: List<String>) {
+    private val allowed = allowed.toSet()
+    private val selected = AtomicInteger()
+    private val other = AtomicInteger()
+    private val unknown = AtomicInteger()
+
+    fun record(packages: List<String>) {
+        when {
+            packages.isEmpty() -> unknown.incrementAndGet()
+            packages.any { it in allowed } -> selected.incrementAndGet()
+            else -> other.incrementAndGet()
+        }
+    }
+
+    fun render() = "Owner checks: selected=${selected.get()}, other=${other.get()}, unknown=${unknown.get()}"
 }

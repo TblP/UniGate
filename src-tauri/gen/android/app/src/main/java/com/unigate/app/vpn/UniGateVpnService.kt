@@ -232,12 +232,22 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         source: String,
     ) {
         closeCore()
+        val checkedPackages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            includePackages
+        } else {
+            emptyList()
+        }
         routingDiagnostics = when {
-            includePackages.isNotEmpty() -> VpnRoutingDiagnostics(source, "only", includePackages)
+            includePackages.isNotEmpty() -> VpnRoutingDiagnostics(
+                source,
+                "only",
+                includePackages,
+                ownerChecks = checkedPackages.takeIf { it.isNotEmpty() }?.let(::VpnOwnerChecks),
+            )
             excludePackages.isNotEmpty() -> VpnRoutingDiagnostics(source, "except", excludePackages)
             else -> VpnRoutingDiagnostics(source, "all", emptyList())
         }
-        val localConfig = VpnLocalConfig.prepare(config, !awgConfig.isNullOrBlank())
+        val localConfig = VpnLocalConfig.prepare(config, !awgConfig.isNullOrBlank(), checkedPackages)
         if (!xrayConfig.isNullOrBlank()) {
             Xraybridge.start(xrayConfig, object : XrayProtector {
                 override fun protect(fd: Long): Boolean =
@@ -401,6 +411,9 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         val excluded = addPackages(options.excludePackage) { builder.addDisallowedApplication(it) }
         val missing = included.second + excluded.second
         routingDiagnostics = routingDiagnostics?.withResult(included.first, excluded.first, missing, false)
+        check(routingDiagnostics?.requestedMode != "only" || included.first.isNotEmpty()) {
+            "Android did not accept any selected VPN application"
+        }
 
         val descriptor = builder.establish()
             ?: error("Android refused to establish the VPN interface")
@@ -517,9 +530,12 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
             InetSocketAddress(sourceAddress, sourcePort),
             InetSocketAddress(destinationAddress, destinationPort),
         )
+        val packages = if (uid >= 0) packageManager.getPackagesForUid(uid)?.toList().orEmpty() else emptyList()
+        routingDiagnostics?.ownerChecks?.record(packages)
         return ConnectionOwner().apply {
             userId = uid
-            userName = packageManager.getPackagesForUid(uid)?.firstOrNull().orEmpty()
+            userName = packages.firstOrNull().orEmpty()
+            setAndroidPackageNames(ListStringIterator(packages))
         }
     }
 
