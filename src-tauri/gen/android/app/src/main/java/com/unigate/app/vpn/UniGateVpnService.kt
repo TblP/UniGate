@@ -65,6 +65,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         const val EXTRA_INCLUDE_PACKAGES = "includePackages"
         const val EXTRA_EXCLUDE_PACKAGES = "excludePackages"
         const val EXTRA_START_TOKEN = "startToken"
+        const val EXTRA_START_SOURCE = "startSource"
 
         private const val CHANNEL_ID = "unigate_vpn"
         private const val NOTIFICATION_ID = 1
@@ -79,7 +80,16 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         @Volatile
         private var trafficSecret: String? = null
 
+        @Volatile
+        private var routingDiagnostics: VpnRoutingDiagnostics? = null
+
         fun runtimeState(): VpnQuickControl.State = liveState
+
+        fun routingDiagnosticsReport(): String? = routingDiagnostics?.render(
+            Build.VERSION.SDK_INT,
+            Build.VERSION.RELEASE,
+            liveState.name.lowercase(),
+        )
 
         fun clashApiSecret(): String? = trafficSecret
 
@@ -168,6 +178,8 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         VpnQuickControl.setState(this, VpnQuickControl.State.CONNECTING)
         showForeground(UiLanguage.text(this, com.unigate.app.R.string.vpn_connecting))
         val startToken = intent?.getLongExtra(EXTRA_START_TOKEN, 0L) ?: 0L
+        val source = intent?.getStringExtra(EXTRA_START_SOURCE)
+            ?: if (alwaysOnRequested) "system-always-on" else "system-restore"
         val includePackages =
             intent?.getStringArrayListExtra(EXTRA_INCLUDE_PACKAGES) ?: saved?.includePackages.orEmpty()
         val excludePackages =
@@ -176,7 +188,7 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
 
         Thread {
             runCatching {
-                startVpn(config, awgConfig, xrayConfig, includePackages, excludePackages)
+                startVpn(config, awgConfig, xrayConfig, includePackages, excludePackages, source)
             }.onSuccess {
                 finishStart(startToken, null)
                 liveState = VpnQuickControl.State.ON
@@ -217,8 +229,14 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         xrayConfig: String?,
         includePackages: List<String>,
         excludePackages: List<String>,
+        source: String,
     ) {
         closeCore()
+        routingDiagnostics = when {
+            includePackages.isNotEmpty() -> VpnRoutingDiagnostics(source, "only", includePackages)
+            excludePackages.isNotEmpty() -> VpnRoutingDiagnostics(source, "except", excludePackages)
+            else -> VpnRoutingDiagnostics(source, "all", emptyList())
+        }
         val localConfig = VpnLocalConfig.prepare(config, !awgConfig.isNullOrBlank())
         if (!xrayConfig.isNullOrBlank()) {
             Xraybridge.start(xrayConfig, object : XrayProtector {
@@ -379,11 +397,14 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
             }
         }
 
-        addIncludedPackages(builder, options.includePackage)
-        addExcludedPackages(builder, options.excludePackage)
+        val included = addPackages(options.includePackage) { builder.addAllowedApplication(it) }
+        val excluded = addPackages(options.excludePackage) { builder.addDisallowedApplication(it) }
+        val missing = included.second + excluded.second
+        routingDiagnostics = routingDiagnostics?.withResult(included.first, excluded.first, missing, false)
 
         val descriptor = builder.establish()
             ?: error("Android refused to establish the VPN interface")
+        routingDiagnostics = routingDiagnostics?.withResult(included.first, excluded.first, missing, true)
         tunnel = descriptor
         return descriptor.fd
     }
@@ -421,24 +442,22 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         }
     }
 
-    private fun addIncludedPackages(builder: Builder, iterator: StringIterator?) {
-        if (iterator == null) return
-        while (iterator.hasNext()) {
+    private fun addPackages(
+        iterator: StringIterator?,
+        applyPackage: (String) -> Unit,
+    ): Pair<List<String>, List<String>> {
+        val accepted = mutableListOf<String>()
+        val missing = mutableListOf<String>()
+        while (iterator != null && iterator.hasNext()) {
+            val packageName = iterator.next()
             try {
-                builder.addAllowedApplication(iterator.next())
+                applyPackage(packageName)
+                accepted += packageName
             } catch (_: NameNotFoundException) {
+                missing += packageName
             }
         }
-    }
-
-    private fun addExcludedPackages(builder: Builder, iterator: StringIterator?) {
-        if (iterator == null) return
-        while (iterator.hasNext()) {
-            try {
-                builder.addDisallowedApplication(iterator.next())
-            } catch (_: NameNotFoundException) {
-            }
-        }
+        return accepted to missing
     }
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true

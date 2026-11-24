@@ -59,6 +59,20 @@ struct StatusResponse {
 }
 
 #[derive(Deserialize)]
+struct RoutingDiagnosticsResponse {
+    report: Option<String>,
+}
+
+pub async fn routing_diagnostics(app: &AppHandle) -> Result<Option<String>, String> {
+    app.state::<VpnPlugin<tauri::Wry>>()
+        .0
+        .run_mobile_plugin_async::<RoutingDiagnosticsResponse>("routingDiagnostics", ())
+        .await
+        .map(|response| response.report)
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
 struct ClashApiSecret {
     secret: Option<String>,
 }

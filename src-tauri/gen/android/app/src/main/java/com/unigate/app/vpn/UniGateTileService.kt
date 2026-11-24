@@ -16,14 +16,15 @@ class UniGateTileService : TileService() {
         super.onClick()
         if (VpnQuickControl.isRunning(this)) {
             VpnQuickControl.disconnect(this)
-        } else if (!VpnQuickControl.connect(this)) {
+        } else if (!VpnQuickControl.connect(this, "tile")) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startActivityAndCollapse(VpnQuickControl.connectPendingIntent(this))
+                startActivityAndCollapse(VpnQuickControl.connectPendingIntent(this, "tile"))
             } else {
                 @Suppress("DEPRECATION")
                 startActivityAndCollapse(
                     android.content.Intent(this, com.unigate.app.MainActivity::class.java).apply {
                         action = VpnQuickControl.ACTION_CONNECT
+                        putExtra(UniGateVpnService.EXTRA_START_SOURCE, "tile")
                         flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
                     },
                 )

@@ -99,4 +99,6 @@ export const ipc = {
   /** Просит Android-лаунчер закрепить домашний виджет UniGate. */
   requestAndroidWidget: () =>
     invoke<boolean>("request_android_widget"),
+
+  androidRoutingDiagnostics: () => invoke<string | null>("android_routing_diagnostics"),
 };

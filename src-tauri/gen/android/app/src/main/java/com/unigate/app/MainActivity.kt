@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
+import com.unigate.app.vpn.UniGateVpnService
 import com.unigate.app.vpn.VpnQuickControl
 
 class MainActivity : TauriActivity() {
@@ -27,7 +28,8 @@ class MainActivity : TauriActivity() {
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     super.onActivityResult(requestCode, resultCode, data)
     if (requestCode == QUICK_VPN_PERMISSION && resultCode == Activity.RESULT_OK) {
-      VpnQuickControl.connect(this)
+      val startSource = intent.getStringExtra(UniGateVpnService.EXTRA_START_SOURCE) ?: "shortcut"
+      VpnQuickControl.connect(this, startSource)
     }
   }
 
@@ -38,7 +40,8 @@ class MainActivity : TauriActivity() {
         if (!VpnQuickControl.hasSavedConnection(this)) return
         val permission = VpnService.prepare(this)
         if (permission == null) {
-          VpnQuickControl.connect(this)
+          val startSource = source.getStringExtra(UniGateVpnService.EXTRA_START_SOURCE) ?: "shortcut"
+          VpnQuickControl.connect(this, startSource)
         } else {
           startActivityForResult(permission, QUICK_VPN_PERMISSION)
         }

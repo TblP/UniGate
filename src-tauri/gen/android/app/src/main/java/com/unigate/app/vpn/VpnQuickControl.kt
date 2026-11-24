@@ -108,7 +108,7 @@ object VpnQuickControl {
         )
     }
 
-    fun connect(context: Context): Boolean {
+    fun connect(context: Context, source: String): Boolean {
         val connection = savedConnection(context)
         if (connection == null || VpnService.prepare(context) != null) return false
 
@@ -119,6 +119,7 @@ object VpnQuickControl {
             putExtra(UniGateVpnService.EXTRA_XRAY_CONFIG, connection.xrayConfig)
             putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, connection.profileName)
             putExtra(UniGateVpnService.EXTRA_START_TOKEN, UniGateVpnService.beginStart())
+            putExtra(UniGateVpnService.EXTRA_START_SOURCE, source)
             putStringArrayListExtra(
                 UniGateVpnService.EXTRA_INCLUDE_PACKAGES,
                 ArrayList(connection.includePackages),
@@ -153,26 +154,27 @@ object VpnQuickControl {
     fun toggle(context: Context) {
         if (isRunning(context)) {
             disconnect(context)
-        } else if (!connect(context)) {
-            requestConnect(context)
+        } else if (!connect(context, "widget")) {
+            requestConnect(context, "widget")
         }
     }
 
-    fun connectPendingIntent(context: Context): PendingIntent {
+    fun connectPendingIntent(context: Context, source: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             action = ACTION_CONNECT
+            putExtra(UniGateVpnService.EXTRA_START_SOURCE, source)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            41,
+            if (source == "tile") 41 else 42,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return pendingIntent
     }
 
-    fun requestConnect(context: Context) {
-        runCatching { connectPendingIntent(context).send() }
+    private fun requestConnect(context: Context, source: String) {
+        runCatching { connectPendingIntent(context, source).send() }
     }
 }

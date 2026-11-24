@@ -46,6 +46,19 @@ pub async fn request_android_quick_tile(app: tauri::AppHandle) -> Result<bool, S
 
 /// Показывает системный запрос лаунчера на закрепление домашнего виджета.
 #[tauri::command]
+pub async fn android_routing_diagnostics(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::connection::routing_diagnostics(&app).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
 pub async fn request_android_widget(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(mobile)]
     {

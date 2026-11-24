@@ -641,8 +641,29 @@ function MobileSettings() {
   const coreError = useAppStore((state) => state.coreError);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const [integrationMessage, setIntegrationMessage] = useState<string | null>(null);
+  const [routingReport, setRoutingReport] = useState<string | null>(null);
+  const [routingCopied, setRoutingCopied] = useState(false);
 
   if (!settings) return <div className="mobile-loading">{t("common.loading")}</div>;
+
+  const showRoutingReport = async () => {
+    setRoutingCopied(false);
+    try {
+      setRoutingReport((await ipc.androidRoutingDiagnostics()) ?? t("routingDiagnostics.empty"));
+    } catch (error) {
+      setRoutingReport(displayError(language, error, "errors.integration"));
+    }
+  };
+
+  const copyRoutingReport = async () => {
+    if (!routingReport) return;
+    try {
+      await navigator.clipboard.writeText(routingReport);
+      setRoutingCopied(true);
+    } catch {
+      setRoutingCopied(false);
+    }
+  };
 
   const requestWidget = async () => {
     setIntegrationMessage(null);
@@ -734,6 +755,13 @@ function MobileSettings() {
           </span>
           <button onClick={() => void requestQuickTile()}>{t("common.add")}</button>
         </div>
+        <div className="mobile-native-feature">
+          <span>
+            <strong>{t("routingDiagnostics.title")}</strong>
+            <small>{t("routingDiagnostics.description")}</small>
+          </span>
+          <button onClick={() => void showRoutingReport()}>{t("routingDiagnostics.open")}</button>
+        </div>
         {integrationMessage && (
           <p className="mobile-native-message">{integrationMessage}</p>
         )}
@@ -763,6 +791,16 @@ function MobileSettings() {
           {t("settings.androidPermission")}
         </span>
       </div>
+      {routingReport !== null && (
+        <Modal title={t("routingDiagnostics.title")} onClose={() => setRoutingReport(null)}>
+          <div className="mobile-share-content">
+            <textarea className="mobile-share-text" readOnly value={routingReport} rows={12} />
+            <button className="mobile-primary-button" onClick={() => void copyRoutingReport()}>
+              {routingCopied ? t("routingDiagnostics.copied") : t("common.copy")}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -108,6 +108,13 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun routingDiagnostics(invoke: Invoke) {
+        invoke.resolve(JSObject().apply {
+            UniGateVpnService.routingDiagnosticsReport()?.let { put("report", it) }
+        })
+    }
+
+    @Command
     fun clashApiSecret(invoke: Invoke) {
         invoke.resolve(JSObject().apply {
             UniGateVpnService.clashApiSecret()?.let { put("secret", it) }
@@ -191,6 +198,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 putExtra(UniGateVpnService.EXTRA_XRAY_CONFIG, args.xrayConfig)
                 putExtra(UniGateVpnService.EXTRA_PROFILE_NAME, args.profileName)
                 putExtra(UniGateVpnService.EXTRA_START_TOKEN, startToken)
+                putExtra(UniGateVpnService.EXTRA_START_SOURCE, "app")
                 putStringArrayListExtra(
                     UniGateVpnService.EXTRA_INCLUDE_PACKAGES,
                     ArrayList(args.includePackages),

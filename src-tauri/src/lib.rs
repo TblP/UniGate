@@ -202,6 +202,7 @@ pub fn run() {
             commands::list_installed_apps,
             commands::request_android_quick_tile,
             commands::request_android_widget,
+            commands::android_routing_diagnostics,
             connection::connect,
             connection::disconnect,
             connection::get_connection_state,
