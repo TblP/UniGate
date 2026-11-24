@@ -1,13 +1,11 @@
-# UniGate 1.2.4 — защита локальных интерфейсов VPN
+# UniGate 1.2.5 — изоляция приложений VPN на Android
 
 ## Русский
 
-- Clash API sing-box требует случайный токен для каждого VPN-подключения. Счётчики трафика в UniGate продолжают работать.
-- Внутренний SOCKS5 AmneziaWG теперь требует пароль для TCP и UDP. Приложения вне туннеля больше не могут использовать этот прокси без учётных данных.
-- На Android защита применяется также при запуске из плитки, виджета и при системном восстановлении старого подключения.
+- В режиме «Только выбранные» на Android 10 и новее sing-box проверяет владельца соединения по списку приложений. Трафик от остальных пакетов или с неизвестным владельцем не получает доступ к VPN-выходу.
+- DNS-запросы из TUN без подтверждённого владельца используют прямой резолвер. Если Android не принял ни одного выбранного приложения, UniGate останавливает подключение.
 
 ## English
 
-- The sing-box Clash API now requires a random token per VPN session. Traffic counters remain available in UniGate.
-- The internal AmneziaWG SOCKS5 proxy now requires a password for TCP and UDP. Apps outside the tunnel need credentials to use it.
-- On Android, these protections also apply to connections started from the quick settings tile, the widget, or restored by the system.
+- In Selected apps only mode on Android 10 or later, sing-box checks the connection owner against the selected package list. Traffic from other packages or an unknown owner cannot use the VPN exit.
+- TUN DNS queries without an identified owner use the direct resolver. UniGate stops the connection if Android does not accept any selected app.

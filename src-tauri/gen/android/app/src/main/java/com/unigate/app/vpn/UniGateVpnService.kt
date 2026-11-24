@@ -118,6 +118,8 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
     private var commandServer: CommandServer? = null
+    @Volatile
+    private var requireAllowedPackages = false
     private var tunnel: ParcelFileDescriptor? = null
     private var defaultNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var defaultInterfaceListener: InterfaceUpdateListener? = null
@@ -219,7 +221,13 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
         excludePackages: List<String>,
     ) {
         closeCore()
-        val localConfig = VpnLocalConfig.prepare(config, !awgConfig.isNullOrBlank())
+        requireAllowedPackages = includePackages.isNotEmpty()
+        val checkedPackages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            includePackages
+        } else {
+            emptyList()
+        }
+        val localConfig = VpnLocalConfig.prepare(config, !awgConfig.isNullOrBlank(), checkedPackages)
         if (!xrayConfig.isNullOrBlank()) {
             Xraybridge.start(xrayConfig, object : XrayProtector {
                 override fun protect(fd: Long): Boolean =
@@ -422,12 +430,16 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
     }
 
     private fun addIncludedPackages(builder: Builder, iterator: StringIterator?) {
-        if (iterator == null) return
-        while (iterator.hasNext()) {
+        var accepted = false
+        while (iterator != null && iterator.hasNext()) {
             try {
                 builder.addAllowedApplication(iterator.next())
+                accepted = true
             } catch (_: NameNotFoundException) {
             }
+        }
+        check(!requireAllowedPackages || accepted) {
+            "Android did not accept any selected VPN application"
         }
     }
 
@@ -498,9 +510,11 @@ class UniGateVpnService : VpnService(), PlatformInterface, CommandServerHandler 
             InetSocketAddress(sourceAddress, sourcePort),
             InetSocketAddress(destinationAddress, destinationPort),
         )
+        val packages = if (uid >= 0) packageManager.getPackagesForUid(uid)?.toList().orEmpty() else emptyList()
         return ConnectionOwner().apply {
             userId = uid
-            userName = packageManager.getPackagesForUid(uid)?.firstOrNull().orEmpty()
+            userName = packages.firstOrNull().orEmpty()
+            setAndroidPackageNames(ListStringIterator(packages))
         }
     }
 
