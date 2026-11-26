@@ -229,7 +229,7 @@ pub fn to_share(name: &str, outbound: &Outbound) -> String {
             q.extend(transport_query(transport));
             format!("vless://{uuid}@{server}:{port}{}#{}", query(&q), enc(name))
         }
-        Outbound::Naive { server, port, username, password } => {
+        Outbound::Naive { server, port, username, password, .. } => {
             let host = if server.contains(':') && !server.starts_with('[') {
                 format!("[{server}]")
             } else {

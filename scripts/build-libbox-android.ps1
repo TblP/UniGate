@@ -30,10 +30,19 @@ if (-not (Test-Path -LiteralPath $ndkDir)) {
   throw "Android NDK not found. Run scripts/setup-android.ps1 first."
 }
 
+if (Test-Path -LiteralPath (Join-Path $sourceDir ".git")) {
+  $currentBranch = (& git -C $sourceDir rev-parse --abbrev-ref HEAD 2>$null)
+  if ($currentBranch -ne "unigate/udp-masque") {
+    Write-Host "Кэш исходников sing-box не из нашей ветки ($currentBranch) — переклонирую."
+    Remove-Item $sourceDir -Recurse -Force
+  }
+}
 if (-not (Test-Path -LiteralPath (Join-Path $sourceDir ".git"))) {
-  git clone --branch "v$version" --depth 1 https://github.com/SagerNet/sing-box.git $sourceDir
+  # Форк с CONNECT-UDP (RFC 9298). Апстрим v1.14.4 этого не умеет;
+  # когда выйдет sing-box 1.15 с MASQUE, верни клон на SagerNet.
+  git clone --branch "unigate/udp-masque" --depth 1 https://github.com/TblP/sing-box.git $sourceDir
   if ($LASTEXITCODE -ne 0) {
-    throw "Failed to download sing-box v$version"
+    throw "Failed to download sing-box unigate/udp-masque"
   }
 }
 

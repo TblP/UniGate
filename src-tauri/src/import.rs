@@ -147,7 +147,7 @@ fn parse_naive(url: &Url) -> Result<(String, Outbound), String> {
     }
     Ok((
         name_of(url, || format!("NaïveProxy {server}")),
-        Outbound::Naive { server, port: url.port().unwrap_or(443), username, password },
+        Outbound::Naive { server, port: url.port().unwrap_or(443), username, password, udp_over_http3: true },
     ))
 }
 
@@ -642,7 +642,8 @@ fn outbound_from_singbox(o: &Value) -> Result<Outbound, String> {
             {
                 return Err("Поддерживается базовый NaïveProxy поверх HTTPS".into());
             }
-            Ok(Outbound::Naive { server, port, username, password })
+            let udp_over_http3 = o.get("udp_over_http3").and_then(Value::as_bool).unwrap_or(true);
+            Ok(Outbound::Naive { server, port, username, password, udp_over_http3 })
         }
         "hysteria2" => {
             let tls = o.get("tls");

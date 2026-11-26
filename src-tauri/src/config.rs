@@ -130,7 +130,7 @@ fn generate_tun(
     vpn_route_excludes: &[String],
 ) -> Value {
     #[cfg(target_os = "windows")]
-    let _ = (bootstrap_ips, tun_ipv6); // Windows: проверенный конфиг, эти механизмы не используем
+    let _ = tun_ipv6; // Windows: IPv6 в TUN не поднимаем
     let use_ru = routing.bypass_ru && geoip_ru.is_some();
 
     let mut rules: Vec<Value> = vec![
@@ -299,19 +299,35 @@ fn generate_tun(
             && routing.vpn_compatibility),
         "stack": stack.as_singbox()
     });
+    // IP сервера прокси исключаем из маршрутов TUN всегда (не только при
+    // bypass_lan). Иначе собственный UDP-транспорт sing-box (QUIC/HTTP3 для
+    // MASQUE, WireGuard, Xray-KCP) уходит в tun0, заворачивается сам в себя и
+    // H3-соединение к прокси таймаутится: «masque: dial …: no recent network
+    // activity». TCP при этом работает, т.к. идёт через outbound-dialer.
+    let mut excludes: Vec<String> = bootstrap_ips
+        .iter()
+        .map(|ip| {
+            let prefix = if ip.is_ipv4() { 32 } else { 128 };
+            format!("{ip}/{prefix}")
+        })
+        .collect();
     if routing.bypass_lan {
         // Исключаем RFC1918 из маршрутов TUN на уровне ОС, а не только выбираем
         // direct-outbound после захвата. Так более специфичные маршруты других
         // VPN (OpenVPN/TAP/Wintun) остаются нативными и не переоткрываются
         // sing-box через физический интерфейс. В частности, это сохраняет
         // рабочие сети 10.240.0.0/24 и 172.16.0.0/12 из OpenVPN.
-        let mut excludes = vec![
-            "10.0.0.0/8".to_string(),
-            "100.64.0.0/10".to_string(),
-            "169.254.0.0/16".to_string(),
-            "172.16.0.0/12".to_string(),
-            "192.168.0.0/16".to_string(),
-        ];
+        for prefix in [
+            "10.0.0.0/8",
+            "100.64.0.0/10",
+            "169.254.0.0/16",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+        ] {
+            if !excludes.iter().any(|e| e == prefix) {
+                excludes.push(prefix.to_string());
+            }
+        }
         // На Windows режим совместимости добавляет реальные маршруты
         // активного OpenVPN/WireGuard-клиента. Так работают не только
         // RFC1918, но и 100.64/10/публичные корпоративные подсети.
@@ -322,6 +338,8 @@ fn generate_tun(
                 }
             }
         }
+    }
+    if !excludes.is_empty() {
         tun_inbound["route_exclude_address"] = json!(excludes);
     }
 
@@ -560,14 +578,15 @@ fn outbound_to_json(outbound: &Outbound) -> Value {
             apply_transport(&mut v, transport);
             v
         }
-        Outbound::Naive { server, port, username, password } => json!({
+        Outbound::Naive { server, port, username, password, udp_over_http3 } => json!({
             "type": "naive",
             "tag": "proxy",
             "server": server,
             "server_port": port,
             "username": username,
             "password": password,
-            "tls": { "enabled": true }
+            "tls": { "enabled": true },
+            "udp_over_http3": *udp_over_http3
         }),
         Outbound::Tuic {
             server,
@@ -843,6 +862,33 @@ mod tests {
         assert!(cfg["dns"].get("rules").is_none());
         assert!(cfg["inbounds"][0].get("route_exclude_address").is_none());
         assert_eq!(cfg["inbounds"][0]["strict_route"], true);
+    }
+
+    #[test]
+    fn tun_excludes_proxy_server_ip_without_lan_bypass() {
+        // UDP-транспорт прокси (MASQUE/H3, WireGuard, Xray) не должен
+        // заворачиваться в собственный TUN: IP сервера исключается всегда.
+        let ips = vec![
+            "48.102.255.20".parse::<std::net::IpAddr>().unwrap(),
+            "2001:db8::1".parse::<std::net::IpAddr>().unwrap(),
+        ];
+        let cfg = generate(
+            &domain_profile(),
+            Mode::Tun,
+            2080,
+            &Routing::default(),
+            None,
+            &ips,
+            false,
+            TunStack::System,
+        );
+        let excludes = cfg["inbounds"][0]["route_exclude_address"]
+            .as_array()
+            .unwrap();
+        assert!(excludes.iter().any(|value| value == "48.102.255.20/32"));
+        assert!(excludes.iter().any(|value| value == "2001:db8::1/128"));
+        // RFC1918 добавляются только при bypass_lan.
+        assert!(!excludes.iter().any(|value| value == "10.0.0.0/8"));
     }
 
     #[test]

@@ -5,6 +5,11 @@
 #   bash scripts/fetch-singbox.sh
 #
 # amneziawg/wintun — только Windows (см. fetch-singbox.ps1).
+#
+# macOS/Windows берут патченный sing-box из форка TblP/sing-box
+# (ветка unigate/udp-masque): CONNECT-UDP (RFC 9298) поверх HTTP/3.
+# В апстриме 1.14.4 этого нет. Когда выйдет sing-box 1.15 с MASQUE,
+# верни URL на SagerNet и удали штампы/константы ниже.
 set -euo pipefail
 
 SINGBOX_VERSION="1.14.4"
@@ -34,8 +39,26 @@ else
 fi
 
 dest="$BIN_DIR/sing-box-${triple}"
+
+# Патченный дистрибутив форка. macOS arm64 собирается в CI с cgo
+# (libcronet.a линкуется статически), поэтому libcronet.dylib не нужен.
+dist_tag=""
+dist_sha256=""
+case "${sb_os}/${sb_arch}" in
+  darwin/arm64)
+    dist_tag="singbox-1.14.4-masque.1"
+    dist_sha256="ff8b84460178168d7536c43d555f3a0ab4feec1a96bd361b9272df15873a5c1a"
+    ;;
+esac
+stamp="$BIN_DIR/.singbox-${sb_os}-dist"
+
 need_download=1
-if [ -f "$dest" ]; then
+if [ -n "$dist_tag" ]; then
+  if [ -f "$dest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$dist_tag" ]; then
+    echo "sing-box уже на месте: $("$dest" version 2>/dev/null | head -1 || true) (dist: $dist_tag)"
+    need_download=0
+  fi
+elif [ -f "$dest" ]; then
   existing="$("$dest" version 2>/dev/null | head -1 || true)"
   echo "sing-box уже на месте: $existing"
   case "$existing" in
@@ -45,11 +68,24 @@ if [ -f "$dest" ]; then
 fi
 
 if [ "$need_download" = 1 ]; then
-  asset="sing-box-${SINGBOX_VERSION}-${sb_os}-${sb_arch}.tar.gz"
-  url="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${asset}"
+  if [ -n "$dist_tag" ]; then
+    asset="sing-box-${SINGBOX_VERSION}-masque.1-${sb_os}-${sb_arch}.tar.gz"
+    url="https://github.com/TblP/sing-box/releases/download/${dist_tag}/${asset}"
+  else
+    asset="sing-box-${SINGBOX_VERSION}-${sb_os}-${sb_arch}.tar.gz"
+    url="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${asset}"
+  fi
   tmp="$(mktemp -d)"
   echo "Скачиваю $url"
-  curl -sL "$url" -o "$tmp/sb.tar.gz"
+  curl -fsSL "$url" -o "$tmp/sb.tar.gz"
+  if [ -n "$dist_sha256" ]; then
+    actual="$(shasum -a 256 "$tmp/sb.tar.gz" | awk '{print $1}' | tr 'A-F' 'a-f')"
+    if [ "$actual" != "$dist_sha256" ]; then
+      rm -rf "$tmp"
+      echo "sing-box SHA256 не совпал: ожидался $dist_sha256, получен $actual" >&2
+      exit 1
+    fi
+  fi
   tar -xzf "$tmp/sb.tar.gz" -C "$tmp"
   exe="$(find "$tmp" -name sing-box -type f | head -1)"
   # Снимаем старый бинарник, а не пишем поверх: перезапись работающего
@@ -58,6 +94,9 @@ if [ "$need_download" = 1 ]; then
   cp "$exe" "$dest"
   chmod +x "$dest"
   rm -rf "$tmp"
+  if [ -n "$dist_tag" ]; then
+    echo "$dist_tag" > "$stamp"
+  fi
   echo "Готово: $dest"
   "$dest" version | head -1
 fi

@@ -1124,7 +1124,9 @@ pub async fn connect(app: AppHandle, profile_id: String) -> Result<ConnectionSta
         Vec::new()
     };
     #[cfg(target_os = "windows")]
-    let bootstrap_ips = if mode == Mode::Tun && (awg_shim || xray_tun) {
+    let bootstrap_ips = if mode == Mode::Tun
+        && (awg_shim || xray_tun || matches!(profile.outbound, Outbound::Naive { .. }))
+    {
         resolve_server_ips(&profile.outbound).await
     } else {
         Vec::new()

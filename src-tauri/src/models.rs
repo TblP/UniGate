@@ -141,6 +141,10 @@ pub enum Outbound {
         port: u16,
         username: String,
         password: String,
+        /// UDP over HTTP/3 (CONNECT-UDP, RFC 9298). Включено по умолчанию;
+        /// старые профили без поля тоже получают true.
+        #[serde(default = "default_true")]
+        udp_over_http3: bool,
     },
     Tuic {
         server: String,

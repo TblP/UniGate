@@ -83,6 +83,8 @@ export type Outbound =
       port: number;
       username: string;
       password: string;
+      /** UDP over HTTP/3 (CONNECT-UDP). По умолчанию включено. */
+      udpOverHttp3?: boolean;
     }
   | {
       type: "tuic";

@@ -19,25 +19,42 @@ $binDir  = Join-Path $root "src-tauri\binaries"
 $dest    = Join-Path $binDir "sing-box-$Triple.exe"
 $cronetDest = Join-Path $binDir "libcronet.dll"
 
+# Патченный sidecar с CONNECT-UDP (RFC 9298) поверх HTTP/3. В апстримном
+# релизе SagerNet этого нет, поэтому берём сборку из форка TblP/sing-box
+# (ветка unigate/udp-masque). Когда выйдет sing-box 1.15 с MASQUE в апстриме,
+# эти ассеты и штамп можно убрать, вернувшись на релизы SagerNet.
+# Обновляя sidecar: собери новый zip, залей в релиз, поменяй Tag/Asset/Sha256.
+$distTag      = "singbox-1.14.4-masque.1"
+$distAsset    = "sing-box-$Version-masque.1-windows-amd64.zip"
+$distSha256   = "3099A8CAB00E7F48D53378CAB109F5AB5B12C629A3E1A621E7F492583AD579A5"
+$distUrl      = "https://github.com/TblP/sing-box/releases/download/$distTag/$distAsset"
+$distStamp    = Join-Path $binDir ".singbox-windows-dist"
+
 $downloadSingBox = $true
-if (Test-Path $dest) {
+if ((Test-Path $dest) -and (Test-Path $cronetDest) -and (Test-Path $distStamp)) {
+  $installed = (Get-Content -LiteralPath $distStamp -Raw).Trim()
   $existing = & $dest version 2>$null | Select-Object -First 1
-  Write-Host "sing-box уже на месте: $existing"
-  if ($existing -eq "sing-box version $Version" -and (Test-Path $cronetDest)) {
+  Write-Host "sing-box уже на месте: $existing (dist: $installed)"
+  if ($existing -eq "sing-box version $Version" -and $installed -eq $distTag) {
     $downloadSingBox = $false
   } else {
-    Write-Host "Версия отличается от $Version — перекачиваю."
+    Write-Host "Дистрибутив отличается от $distTag — перекачиваю."
   }
 }
 
 if ($downloadSingBox) {
-  $asset = "sing-box-$Version-windows-amd64.zip"
-  $url   = "https://github.com/SagerNet/sing-box/releases/download/v$Version/$asset"
-  $tmp   = Join-Path $env:TEMP $asset
-  $ext   = Join-Path $env:TEMP "singbox_ext_$Version"
+  $tmp   = Join-Path $env:TEMP $distAsset
+  $ext   = Join-Path $env:TEMP "singbox_ext_$distTag"
+  $actualSha256 = $null
 
-  Write-Host "Скачиваю $url"
-  Invoke-WebRequest -Uri $url -OutFile $tmp -Headers @{ "User-Agent" = "UniGate" }
+  Write-Host "Скачиваю $distUrl"
+  Invoke-WebRequest -Uri $distUrl -OutFile $tmp -Headers @{ "User-Agent" = "UniGate" }
+
+  $actualSha256 = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash
+  if ($actualSha256 -ne $distSha256) {
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    throw "sing-box zip SHA256 mismatch: expected $distSha256, got $actualSha256"
+  }
 
   if (Test-Path $ext) { Remove-Item $ext -Recurse -Force }
   Expand-Archive -Path $tmp -DestinationPath $ext -Force
@@ -50,6 +67,7 @@ if ($downloadSingBox) {
   New-Item -ItemType Directory -Force -Path $binDir | Out-Null
   Copy-Item $exe.FullName $dest -Force
   Copy-Item -LiteralPath $cronet -Destination $cronetDest -Force
+  Set-Content -LiteralPath $distStamp -Value $distTag -NoNewline
   Remove-Item $tmp, $ext -Recurse -Force
 
   Write-Host "Готово: $dest"
