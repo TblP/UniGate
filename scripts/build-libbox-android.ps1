@@ -35,6 +35,18 @@ if (Test-Path -LiteralPath (Join-Path $sourceDir ".git")) {
   if ($currentBranch -ne "unigate/udp-masque") {
     Write-Host "Кэш исходников sing-box не из нашей ветки ($currentBranch) — переклонирую."
     Remove-Item $sourceDir -Recurse -Force
+  } else {
+    # Ветка та же, но клон мог устареть: подтягиваем последний коммит,
+    # иначе локальная сборка тихо использует старый libbox.
+    Write-Host "Обновляю исходники sing-box до origin/unigate/udp-masque"
+    git -C $sourceDir fetch --depth 1 origin unigate/udp-masque
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to fetch sing-box unigate/udp-masque"
+    }
+    git -C $sourceDir reset --hard FETCH_HEAD | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to reset sing-box to origin/unigate/udp-masque"
+    }
   }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $sourceDir ".git"))) {
