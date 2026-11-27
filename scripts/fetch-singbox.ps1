@@ -24,9 +24,9 @@ $cronetDest = Join-Path $binDir "libcronet.dll"
 # (ветка unigate/udp-masque). Когда выйдет sing-box 1.15 с MASQUE в апстриме,
 # эти ассеты и штамп можно убрать, вернувшись на релизы SagerNet.
 # Обновляя sidecar: собери новый zip, залей в релиз, поменяй Tag/Asset/Sha256.
-$distTag      = "singbox-1.14.4-masque.1"
-$distAsset    = "sing-box-$Version-masque.1-windows-amd64.zip"
-$distSha256   = "3099A8CAB00E7F48D53378CAB109F5AB5B12C629A3E1A621E7F492583AD579A5"
+$distTag      = "singbox-1.14.4-masque.2"
+$distAsset    = "sing-box-$Version-masque.2-windows-amd64.zip"
+$distSha256   = "AA5E0B2C57E10A5989C0551C5036549BA0FCDA032E1B8BDF40A2607128675DBB"
 $distUrl      = "https://github.com/TblP/sing-box/releases/download/$distTag/$distAsset"
 $distStamp    = Join-Path $binDir ".singbox-windows-dist"
 

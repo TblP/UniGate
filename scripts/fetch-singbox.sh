@@ -46,8 +46,8 @@ dist_tag=""
 dist_sha256=""
 case "${sb_os}/${sb_arch}" in
   darwin/arm64)
-    dist_tag="singbox-1.14.4-masque.1"
-    dist_sha256="ff8b84460178168d7536c43d555f3a0ab4feec1a96bd361b9272df15873a5c1a"
+    dist_tag="singbox-1.14.4-masque.2"
+    dist_sha256="e3ed854af9d110ab8dcc21adf0b29d99685fcbe4a8e028fcb15cb28462f956db"
     ;;
 esac
 stamp="$BIN_DIR/.singbox-${sb_os}-dist"
@@ -69,7 +69,7 @@ fi
 
 if [ "$need_download" = 1 ]; then
   if [ -n "$dist_tag" ]; then
-    asset="sing-box-${SINGBOX_VERSION}-masque.1-${sb_os}-${sb_arch}.tar.gz"
+    asset="sing-box-${SINGBOX_VERSION}-masque.2-${sb_os}-${sb_arch}.tar.gz"
     url="https://github.com/TblP/sing-box/releases/download/${dist_tag}/${asset}"
   else
     asset="sing-box-${SINGBOX_VERSION}-${sb_os}-${sb_arch}.tar.gz"
